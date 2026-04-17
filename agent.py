@@ -61,6 +61,9 @@ _TOOL_LABELS: dict[str, str] = {
     "list_schedules": "lista sveglie",
     "delete_schedule": "eliminazione sveglia",
     "refresh_schedule": "aggiornamento sveglia",
+    "list_events": "lettura calendario",
+    "create_event": "creazione evento calendario",
+    "delete_event": "eliminazione evento calendario",
 }
 
 
@@ -180,11 +183,34 @@ def _make_file_agent() -> Agent:
     )
 
 
+def _make_calendar_agent() -> Agent:
+    from calendar_tools import list_events, create_event, delete_event
+    return Agent(
+        name="CalendarAgent",
+        role="Gestione del calendario Google: legge eventi futuri, crea nuovi eventi, elimina eventi.",
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + " Sei l'agente del calendario di AnClaw. "
+            "Usa list_events per leggere gli appuntamenti futuri, "
+            "create_event per aggiungere nuovi eventi (ricava data e ora precisa dalla richiesta), "
+            "delete_event per eliminare un evento dato il suo ID. "
+            "Quando crei un evento, ricava start e end datetime in formato ISO 8601 (es. '2026-04-20T10:00:00'). "
+            "Se l'ora di fine non è specificata, usa 1 ora dopo l'inizio come default. "
+            "Conferma sempre all'utente l'azione eseguita con titolo, data e ora."
+        ),
+        tools=[list_events, create_event, delete_event],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "SearchAgent": _make_search_agent,
     "ScraperAgent": _make_scraper_agent,
     "YouTubeAgent": _make_youtube_agent,
     "FileAgent": _make_file_agent,
+    "CalendarAgent": _make_calendar_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -193,7 +219,8 @@ _CATALOG_DESCRIPTIONS = (
     "- SynthAgent: sintetizzatore finale con memoria di sessione — risponde a domande, elabora i dati raccolti\n"
     "- YouTubeAgent: analisi video YouTube, trascrizioni, ricerca canali\n"
     "- FileAgent: generazione di file (PDF, CSV, testo, ecc.)\n"
-    "- SchedulerAgent: gestione sveglie e task ricorrenti (crea, lista, elimina, refresh piano)"
+    "- SchedulerAgent: gestione sveglie e task ricorrenti (crea, lista, elimina, refresh piano)\n"
+    "- CalendarAgent: lettura e gestione calendario Google (leggi eventi, crea eventi, elimina eventi)"
 )
 
 
@@ -242,7 +269,10 @@ REGOLE DI ROUTING:
 5. GESTIONE SVEGLIE E TASK RICORRENTI:
    → route: [SchedulerAgent] da solo
 
-6. CRAWLING DI URL SPECIFICI già noti:
+6. CALENDARIO GOOGLE (leggere eventi, aggiungere appuntamenti, eliminare eventi):
+   → route: [CalendarAgent] da solo
+
+8. CRAWLING DI URL SPECIFICI già noti:
    → coordinate: [ScraperAgent → SynthAgent]
 
 REGOLE GENERALI:
