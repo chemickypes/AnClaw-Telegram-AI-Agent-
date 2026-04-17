@@ -14,7 +14,7 @@ The result is a system that doesn't waste resources on simple tasks (direct answ
 User → Telegram
           │
           ▼
-   ArchitectAgent  (Gemini 2.5 Pro)
+   ArchitectAgent  (Gemini 2.5 Flash)
    Analyzes the request and produces a JSON plan:
    - which mode to use (route / coordinate / broadcast)
    - which agents to involve
@@ -58,6 +58,18 @@ The agent supports cron-based scheduled tasks. You can say, for example:
 > "Every morning at 8 send me the top 10 Hacker News stories"
 
 The SchedulerAgent creates the schedule, the Architect pre-bakes the execution plan, and APScheduler fires the task at the given time, sending the result directly to the chat.
+
+---
+
+## Bot commands
+
+| Command | Description |
+|---|---|
+| `/start` | Welcome message |
+| `/help` | Usage guide and supported input types |
+| `/sveglie` | List active schedules with inline buttons to delete or refresh each one |
+| `/status` | Show bot mode (polling/webhook), number of active schedules, and sessions in memory |
+| `/reset` | Clear the current session memory for ArchitectAgent, SynthAgent, and Team — start fresh |
 
 ---
 
