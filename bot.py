@@ -2,7 +2,7 @@ import asyncio
 import io
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import (
     Application,
@@ -43,6 +43,35 @@ _IMAGE_FORMAT = {
     "image/webp": "webp",
 }
 
+_TELEGRAM_MAX_LENGTH = 4096
+_FILE_THRESHOLD = _TELEGRAM_MAX_LENGTH * 2  # > 8192 chars → send as file
+
+
+def _chunk_text(text: str, max_length: int = _TELEGRAM_MAX_LENGTH) -> list[str]:
+    """Split text into chunks that fit within Telegram's message size limit.
+
+    Tries to split at paragraph boundaries, then newlines, then spaces,
+    falling back to a hard cut only if no whitespace is found.
+    """
+    if len(text) <= max_length:
+        return [text]
+    chunks: list[str] = []
+    while text:
+        if len(text) <= max_length:
+            chunks.append(text)
+            break
+        split_at = text.rfind("\n\n", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind("\n", 0, max_length)
+        if split_at == -1:
+            split_at = text.rfind(" ", 0, max_length)
+        if split_at == -1:
+            split_at = max_length
+        chunks.append(text[:split_at].strip())
+        text = text[split_at:].strip()
+    return [c for c in chunks if c]
+
+
 # Parole chiave che suggeriscono una richiesta di scheduling
 _SCHEDULING_KEYWORDS = frozenset({
     "imposta", "metti", "programma", "sveglia", "promemoria",
@@ -75,6 +104,13 @@ class TelegramBot:
             scheduler.start()
             load_jobs_from_db(scheduler)
             set_executor_context(agent, app)
+            await app.bot.set_my_commands([
+                BotCommand("start",   "Messaggio di benvenuto"),
+                BotCommand("help",    "Guida all'uso del bot"),
+                BotCommand("sveglie", "Elenca le sveglie attive"),
+                BotCommand("status",  "Modalità bot, sveglie e sessioni in memoria"),
+                BotCommand("reset",   "Cancella la memoria di sessione"),
+            ])
             logger.info("APScheduler avviato e sveglie caricate dal DB.")
 
         async def _post_shutdown(app: Application) -> None:
@@ -102,6 +138,9 @@ class TelegramBot:
 
         self.app.add_handler(CommandHandler("start", self._handle_start, filters=user_filter))
         self.app.add_handler(CommandHandler("help", self._handle_help, filters=user_filter))
+        self.app.add_handler(CommandHandler("reset", self._handle_reset, filters=user_filter))
+        self.app.add_handler(CommandHandler("status", self._handle_status, filters=user_filter))
+        self.app.add_handler(CommandHandler("sveglie", self._handle_sveglie, filters=user_filter))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, self._handle_message)
         )
@@ -130,11 +169,28 @@ class TelegramBot:
 
     @staticmethod
     async def _safe_reply(message: Message, text: str) -> None:
-        """Send a reply trying Markdown first, falling back to plain text."""
-        try:
-            await message.reply_text(text, parse_mode="Markdown")
-        except BadRequest:
-            await message.reply_text(text)
+        """Send a reply.
+
+        - Up to 4096 chars: single message.
+        - 4097–8192 chars: split into chunks.
+        - Over 8192 chars: send as a .md file to keep the chat readable.
+        """
+        if len(text) > _FILE_THRESHOLD:
+            buf = io.BytesIO(text.encode())
+            buf.name = "response.md"
+            await message.reply_document(
+                document=buf,
+                filename="response.md",
+                caption="_La risposta è molto lunga, la trovi nel file allegato._",
+                parse_mode="Markdown",
+            )
+            return
+
+        for chunk in _chunk_text(text):
+            try:
+                await message.reply_text(chunk, parse_mode="Markdown")
+            except BadRequest:
+                await message.reply_text(chunk)
 
     # ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -151,11 +207,86 @@ class TelegramBot:
             "• Immagini (foto o file PNG/JPG/WEBP)\n"
             "• Documenti: PDF, DOC, DOCX, XLSX, CSV\n\n"
             "Usa la didascalia per darmi istruzioni sul file.\n\n"
+            "*Comandi:*\n"
+            "• /reset — cancella la memoria di sessione e riparte da zero\n"
+            "• /status — mostra modalità bot, sveglie attive e sessioni in memoria\n"
+            "• /sveglie — elenca le sveglie attive con pulsanti per eliminarle o aggiornarle\n\n"
             "*Sveglie ricorrenti:*\n"
             "• \"Programma ogni mattina alle 8 le notizie di HackerNews\"\n"
             "• \"Mostra le sveglie attive\"\n"
             "• \"Elimina la sveglia abc12345\"",
             parse_mode="Markdown",
+        )
+
+    async def _handle_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        self.agent.reset_user_sessions(user_id)
+        logger.info(f"Reset sessione per user {user_id}")
+        await update.message.reply_text(
+            "Memoria di sessione cancellata. Ripartiamo da zero!"
+        )
+
+    async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        import sqlite3
+        from scheduler import _all_schedules
+
+        mode = self.config.mode.value.upper()
+
+        schedules = _all_schedules()
+        n_schedules = len(schedules)
+
+        n_sessions = 0
+        try:
+            with sqlite3.connect(self.agent._db_path) as conn:
+                for table in ("architect_sessions", "synth_sessions", "team_sessions"):
+                    try:
+                        row = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                        n_sessions += row[0] if row else 0
+                    except sqlite3.OperationalError:
+                        pass
+        except Exception:
+            logger.debug("Errore lettura sessioni per /status")
+
+        text = (
+            f"*Stato del bot*\n\n"
+            f"Modalità: `{mode}`\n"
+            f"Sveglie attive: `{n_schedules}`\n"
+            f"Sessioni in memoria: `{n_sessions}`"
+        )
+
+        if schedules:
+            text += "\n\n*Sveglie:*"
+            for sid, user_msg, cron_expr, _ in schedules:
+                preview = user_msg[:45] + ("…" if len(user_msg) > 45 else "")
+                text += f"\n• `{sid}` — _{preview}_\n  ⏰ `{cron_expr}`"
+
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+    async def _handle_sveglie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from datetime import datetime as _dt
+        from scheduler import _all_schedules
+
+        rows = _all_schedules()
+        if not rows:
+            await update.message.reply_text("Nessuna sveglia attiva al momento.")
+            return
+
+        lines = ["*Sveglie attive:*\n"]
+        keyboard = []
+        for i, (sid, user_msg, cron_expr, created_at) in enumerate(rows, 1):
+            dt = _dt.fromisoformat(created_at).strftime("%d/%m/%Y %H:%M")
+            lines.append(
+                f"{i}. _{user_msg}_\n   ⏰ `{cron_expr}` | creata {dt}\n   ID: `{sid}`\n"
+            )
+            keyboard.append([
+                InlineKeyboardButton(f"🗑 Elimina {sid}", callback_data=f"sched_del:{sid}"),
+                InlineKeyboardButton(f"🔄 Refresh {sid}", callback_data=f"sched_ref:{sid}"),
+            ])
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

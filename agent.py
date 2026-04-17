@@ -15,7 +15,6 @@ from agno.team import Team
 from agno.run.team import TeamRunEvent
 from agno.tools.crawl4ai import Crawl4aiTools
 from agno.tools.hackernews import HackerNewsTools
-from agno.tools.reddit import RedditTools
 from agno.tools.youtube import YouTubeTools
 from agno.tools.webbrowser import WebBrowserTools
 from agno.tools.websearch import WebSearchTools
@@ -50,9 +49,6 @@ _TOOL_LABELS: dict[str, str] = {
     "get_top_hackernews_stories": "Hacker News",
     "get_hackernews_story": "Hacker News",
     "search_hackernews": "Hacker News",
-    "get_subreddit_posts": "Reddit",
-    "search_reddit": "Reddit",
-    "get_reddit_post": "Reddit",
     "web_browser": "apertura pagina web",
     "crawl4ai": "scraping pagina web",
     "crawl_url": "scraping pagina web",
@@ -85,24 +81,47 @@ class ArchitectPlan(BaseModel):
     agents: list[AgentSpec]
 
 
+_ARCHITECT_HINT = (
+    "\n\nATTENZIONE: la tua risposta precedente non era un piano valido. "
+    "Rispondi SOLO con un JSON che corrisponde esattamente allo schema ArchitectPlan. "
+    "Campi obbligatori: goal (str), intermediate_message (str), team_name (str), "
+    "team_mode (\"coordinate\"|\"route\"|\"broadcast\"), "
+    "agents (lista di oggetti con name, role, instructions, is_pure_llm). "
+    "Nessun testo fuori dal JSON."
+)
+
+_FALLBACK_PLAN = ArchitectPlan(
+    goal="Rispondere alla richiesta dell'utente",
+    intermediate_message="Elaboro la tua richiesta...",
+    team_name="Fallback Team",
+    team_mode="route",
+    agents=[AgentSpec(
+        name="SynthAgent",
+        role="Sintetizzatore",
+        instructions="Rispondi alla richiesta nel modo più utile possibile.",
+        is_pure_llm=False,
+    )],
+)
+
+
 # ── Catalogo agenti (factory functions, senza memoria) ────────────────────────
 
 def _make_search_agent() -> Agent:
     return Agent(
         name="SearchAgent",
         role=(
-            "Esegue ricerche web, su Hacker News e Reddit. "
+            "Esegue ricerche web e su Hacker News. "
             "Restituisce una lista di URL rilevanti con titoli e snippet per ogni risultato trovato."
         ),
         model=Gemini(id="gemini-2.5-flash"),
         instructions=(
             _base_instructions()
             + " Il tuo unico compito è cercare informazioni e restituire URL + snippet rilevanti. "
-            "Usa WebSearchTools per ricerche generali, HackerNews per notizie tech, Reddit per discussioni. "
+            "Usa WebSearchTools per ricerche generali, HackerNews per notizie tech. "
             "NON aprire le pagine: limitati a elencare i risultati con URL, titolo e snippet. "
             "Restituisci sempre gli URL completi trovati, sono necessari per il passo successivo."
         ),
-        tools=[WebSearchTools(enable_news=False), HackerNewsTools(), RedditTools()],
+        tools=[WebSearchTools(enable_news=False), HackerNewsTools()],
         debug_mode=True,
         debug_level=2,
     )
@@ -169,7 +188,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
 }
 
 _CATALOG_DESCRIPTIONS = (
-    "- SearchAgent: ricerca web, Hacker News, Reddit — restituisce URL + snippet, NON apre le pagine\n"
+    "- SearchAgent: ricerca web, Hacker News — restituisce URL + snippet, NON apre le pagine\n"
     "- ScraperAgent: apre e legge pagine web dagli URL, estrae contenuto completo (WebBrowser + Crawl4AI)\n"
     "- SynthAgent: sintetizzatore finale con memoria di sessione — risponde a domande, elabora i dati raccolti\n"
     "- YouTubeAgent: analisi video YouTube, trascrizioni, ricerca canali\n"
@@ -231,6 +250,32 @@ REGOLE GENERALI:
 - Scegli SOLO gli agenti strettamente necessari.
 - intermediate_message: frase breve in italiano che descrive cosa sta per succedere (es. "Cerco le informazioni e analizzo le pagine rilevanti."). Nessuna analisi del contenuto.
 - Il goal deve descrivere il risultato atteso.
+
+ESEMPI DI OUTPUT JSON ATTESO:
+
+Richiesta: "chi ha ucciso Lincoln?"
+{{
+  "goal": "Rispondere alla domanda su chi ha assassinato Abraham Lincoln",
+  "intermediate_message": "Rispondo direttamente alla tua domanda.",
+  "team_name": "AnClaw Direct Team",
+  "team_mode": "route",
+  "agents": [
+    {{"name": "SynthAgent", "role": "Sintetizzatore", "instructions": "Rispondi alla domanda su chi ha assassinato Lincoln usando la tua conoscenza storica.", "is_pure_llm": false}}
+  ]
+}}
+
+Richiesta: "ultime notizie su OpenAI"
+{{
+  "goal": "Raccogliere e sintetizzare le ultime notizie su OpenAI",
+  "intermediate_message": "Cerco le ultime notizie su OpenAI e analizzo le fonti.",
+  "team_name": "AnClaw News Team",
+  "team_mode": "coordinate",
+  "agents": [
+    {{"name": "SearchAgent", "role": "Ricercatore web", "instructions": "Cerca le ultime notizie su OpenAI e restituisci URL e snippet rilevanti.", "is_pure_llm": false}},
+    {{"name": "ScraperAgent", "role": "Lettore di pagine", "instructions": "Apri i top 3 URL trovati da SearchAgent ed estrai il contenuto testuale completo.", "is_pure_llm": false}},
+    {{"name": "SynthAgent", "role": "Sintetizzatore", "instructions": "Elabora i contenuti estratti e produci un riassunto delle ultime notizie su OpenAI.", "is_pure_llm": false}}
+  ]
+}}
 """.strip()
 
 
@@ -242,7 +287,7 @@ class AIAgent:
 
         self._architect = Agent(
             name="ArchitectAgent",
-            model=Gemini(id="gemini-2.5-pro"),
+            model=Gemini(id="gemini-2.5-flash"),
             instructions=_ARCHITECT_INSTRUCTIONS,
             output_schema=ArchitectPlan,
             db=SqliteDb(
@@ -293,6 +338,21 @@ class AIAgent:
     def scheduler(self):
         return self._scheduler
 
+    def reset_user_sessions(self, user_id: int) -> None:
+        """Cancella le sessioni di ArchitectAgent, SynthAgent e Team per l'utente."""
+        import sqlite3
+        session_map = {
+            "architect_sessions": f"architect_{user_id}",
+            "synth_sessions": f"synth_{user_id}",
+            "team_sessions": f"team_{user_id}",
+        }
+        with sqlite3.connect(self._db_path) as conn:
+            for table, session_id in session_map.items():
+                try:
+                    conn.execute(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))
+                except Exception:
+                    logger.debug("Tabella %r non trovata o errore cancellazione, skip.", table)
+
     def _make_scheduler_agent(self) -> Agent:
         from scheduler import make_scheduler_tools
         tools = make_scheduler_tools(
@@ -332,6 +392,42 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
             debug_level=2,
         )
 
+    async def _run_architect(
+        self,
+        message: str,
+        user_id: str,
+        session_id: str,
+        images: list | None = None,
+        files: list | None = None,
+    ) -> ArchitectPlan:
+        """Chiama l'Architetto con retry (max 2 tentativi) e fallback automatico."""
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                msg = message if attempt == 0 else message + _ARCHITECT_HINT
+                response = await self._architect.arun(
+                    msg,
+                    user_id=user_id,
+                    session_id=session_id,
+                    images=images or None,
+                    files=files or None,
+                )
+                plan = response.content
+                if isinstance(plan, ArchitectPlan):
+                    return plan
+                logger.warning(
+                    f"Architect tentativo {attempt + 1}: tipo inatteso {type(plan)}"
+                )
+                last_exc = ValueError(f"tipo inatteso: {type(plan)}")
+            except Exception as e:
+                logger.warning(f"Architect tentativo {attempt + 1} fallito: {e}")
+                last_exc = e
+
+        logger.error(
+            f"Architect fallito dopo 2 tentativi, uso fallback. Ultimo errore: {last_exc}"
+        )
+        return _FALLBACK_PLAN
+
     async def _get_plan(self, task_description: str) -> ArchitectPlan:
         """Run just the Architect to get a pre-baked plan, without executing the team."""
         now = datetime.now(_TZ)
@@ -340,15 +436,11 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
             f"[Contesto: oggi è {date_str}, knowledge cutoff modello {_CUTOFF}]\n\n"
             f"{task_description}"
         )
-        response = await self._architect.arun(
+        return await self._run_architect(
             message,
             user_id="scheduler",
             session_id="architect_scheduler",
         )
-        plan = response.content
-        if not isinstance(plan, ArchitectPlan):
-            raise ValueError(f"Architect returned unexpected type: {type(plan)}")
-        return plan
 
     def _build_members(self, plan: ArchitectPlan) -> list[Agent]:
         members: list[Agent] = []
@@ -451,18 +543,13 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
         architect_message = (
             f"[Contesto: oggi è {date_str}, knowledge cutoff modello {_CUTOFF}]\n\n{message}"
         )
-        architect_response = await self._architect.arun(
+        plan = await self._run_architect(
             architect_message,
             user_id=str(user_id),
             session_id=f"architect_{user_id}",
-            images=images or None,
-            files=files or None,
+            images=images,
+            files=files,
         )
-
-        plan = architect_response.content
-        if not isinstance(plan, ArchitectPlan):
-            logger.error(f"Architect ha restituito un tipo inatteso: {type(plan)}")
-            return "Errore nella pianificazione. Riprova più tardi.", []
 
         logger.info(
             f"Piano architetto: mode={plan.team_mode}, "
