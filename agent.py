@@ -20,6 +20,9 @@ from agno.tools.webbrowser import WebBrowserTools
 from agno.tools.websearch import WebSearchTools
 from agno.tools.file_generation import FileGenerationTools
 
+import memory_store
+import notes_store
+
 
 _DB_PATH = os.path.join(os.path.dirname(__file__), "tmp", "agent_data.db")
 os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
@@ -67,6 +70,10 @@ _TOOL_LABELS: dict[str, str] = {
     "list_events": "lettura calendario",
     "create_event": "creazione evento calendario",
     "delete_event": "eliminazione evento calendario",
+    "save_note": "salvataggio nota",
+    "list_notes": "lettura note",
+    "search_notes": "ricerca nelle note",
+    "delete_note": "eliminazione nota",
 }
 
 
@@ -108,6 +115,44 @@ _FALLBACK_PLAN = ArchitectPlan(
         is_pure_llm=False,
     )],
 )
+
+
+# ── Estrazione fatti espliciti ────────────────────────────────────────────────
+
+_EXPLICIT_TRIGGERS = (
+    "ricordati che ", "ricordati: ", "ricorda che ", "ricorda: ",
+    "nota che ", "nota: ", "memorizza che ", "memorizza: ",
+    "tieni a mente che ", "tieni a mente: ",
+)
+
+
+_QUICK_NOTE_TRIGGERS = (
+    "nota: ", "appunto: ", "nota- ", "appunto- ",
+)
+
+
+def _extract_quick_note(message: str) -> str | None:
+    """
+    Se il messaggio inizia con "Nota: ..." o "Appunto: ...",
+    ritorna il testo della nota. Altrimenti None.
+    """
+    lower = message.lower().strip()
+    for trigger in _QUICK_NOTE_TRIGGERS:
+        if lower.startswith(trigger):
+            return message[len(trigger):].strip()
+    return None
+
+
+def _extract_explicit_fact(message: str) -> str | None:
+    """
+    Se il messaggio inizia con una frase esplicita di memorizzazione,
+    ritorna la parte da ricordare. Altrimenti None.
+    """
+    lower = message.lower().strip()
+    for trigger in _EXPLICIT_TRIGGERS:
+        if lower.startswith(trigger):
+            return message[len(trigger):].strip()
+    return None
 
 
 # ── Catalogo agenti (factory functions, senza memoria) ────────────────────────
@@ -235,6 +280,63 @@ def _make_calendar_agent() -> Agent:
     )
 
 
+def _make_notes_agent() -> Agent:
+    def save_note(content: str) -> str:
+        """
+        Salva una nuova nota/appunto.
+
+        Args:
+            content: Testo della nota da salvare.
+        """
+        note_id = notes_store.save_note(content)
+        return f"Nota salvata (ID: {note_id}): {content}"
+
+    def list_notes() -> str:
+        """Mostra tutte le note salvate, dalla più recente."""
+        notes = notes_store.get_all_notes()
+        return notes_store.format_notes(notes)
+
+    def search_notes(query: str) -> str:
+        """
+        Cerca nelle note quelle che contengono una parola o frase.
+
+        Args:
+            query: Parola o frase da cercare nelle note.
+        """
+        notes = notes_store.search_notes(query)
+        if not notes:
+            return f"Nessuna nota trovata per: \"{query}\"."
+        return f"Note trovate per \"{query}\":\n" + notes_store.format_notes(notes)
+
+    def delete_note(note_id: int) -> str:
+        """
+        Elimina una nota dato il suo ID numerico.
+
+        Args:
+            note_id: ID della nota da eliminare (intero).
+        """
+        if notes_store.delete_note(note_id):
+            return f"Nota {note_id} eliminata."
+        return f"Nota {note_id} non trovata."
+
+    return Agent(
+        name="NotesAgent",
+        role="Gestione appunti personali: salva, mostra, cerca ed elimina note.",
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + " Sei l'agente degli appunti di AnClaw. "
+            "Usa save_note per salvare una nota, list_notes per mostrare tutte le note, "
+            "search_notes per cercare nelle note, delete_note per eliminarne una per ID. "
+            "Quando mostri le note, presentale in modo leggibile. "
+            "Conferma sempre l'azione eseguita."
+        ),
+        tools=[save_note, list_notes, search_notes, delete_note],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "SearchAgent": _make_search_agent,
     "ScraperAgent": _make_scraper_agent,
@@ -242,6 +344,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "FileAgent": _make_file_agent,
     "CalendarAgent": _make_calendar_agent,
     "CodeAgent": _make_code_agent,
+    "NotesAgent": _make_notes_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -253,7 +356,8 @@ _CATALOG_DESCRIPTIONS = (
     "- SchedulerAgent: gestione sveglie e task ricorrenti (crea, lista, elimina, refresh piano)\n"
     "- CalendarAgent: lettura e gestione calendario Google (leggi eventi, crea eventi, elimina eventi)\n"
     "- CodeAgent: esegue operazioni matematiche/statistiche e analisi su file CSV/Excel "
-    "(usa RestrictedPython — sicuro, nessun accesso a filesystem o internet)"
+    "(usa RestrictedPython — sicuro, nessun accesso a filesystem o internet)\n"
+    "- NotesAgent: gestione appunti personali — salva note, mostra tutte le note, cerca nelle note, elimina note per ID"
 )
 
 
@@ -312,7 +416,11 @@ REGOLE DI ROUTING:
    Il messaggio contiene [FILE SALVATO: path] quando l'utente ha allegato un file.
    → route: [CodeAgent] da solo
 
-9. CRAWLING DI URL SPECIFICI già noti:
+9. APPUNTI E NOTE PERSONALI (salva appunto, mostra note, cerca nelle note, elimina nota):
+   Il messaggio contiene parole come "nota", "appunto", "mostra le note", "cerca nelle note", "elimina nota".
+   → route: [NotesAgent] da solo
+
+10. CRAWLING DI URL SPECIFICI già noti:
    → coordinate: [ScraperAgent → SynthAgent]
 
 REGOLE GENERALI:
@@ -370,8 +478,38 @@ class AIAgent:
             debug_level=2,
         )
 
-        # SynthAgent statico con session memory (ricorda la conversazione corrente)
-        self._synth_agent = Agent(
+        # Agente leggero per estrazione fatti (nessuna memoria, nessun tool)
+        self._fact_extractor = Agent(
+            name="FactExtractor",
+            model=Gemini(id="gemini-2.5-flash"),
+            instructions=(
+                "Sei un estrattore di fatti personali. "
+                "Dato un messaggio di Angelo, estrai solo i fatti stabili e permanenti su di lui: "
+                "preferenze, abitudini, dati anagrafici, luoghi, professione, hobby, ecc. "
+                "Ignora domande, comandi, richieste temporanee o fatti non riguardanti Angelo. "
+                "Rispondi SOLO con una lista JSON di stringhe (es. [\"Abita a Milano\"]). "
+                "Se non ci sono fatti permanenti, rispondi con []."
+            ),
+            debug_mode=False,
+        )
+
+        self._current_chat_id: int | None = None
+
+        memory_store.init_memory_table()
+        notes_store.init_notes_table()
+
+        from scheduler import create_scheduler
+        self._scheduler = create_scheduler()
+
+    @property
+    def scheduler(self):
+        return self._scheduler
+
+    def _make_synth_agent(self) -> Agent:
+        """Crea il SynthAgent iniettando i fatti correnti nelle istruzioni."""
+        facts_text = memory_store.get_facts_text()
+        memory_section = f"\n\n{facts_text}" if facts_text else ""
+        return Agent(
             name="SynthAgent",
             role=(
                 "Sintetizzatore finale con memoria di sessione. "
@@ -387,9 +525,10 @@ class AIAgent:
                 "Quando sei il solo agente nel team (fatti storici noti, definizioni), "
                 "rispondi direttamente e con sicurezza usando la tua conoscenza. "
                 "Ricordi la conversazione corrente: gestisci correttamente le domande di follow-up."
+                + memory_section
             ),
             db=SqliteDb(
-                db_file=_DB_PATH,
+                db_file=self._db_path,
                 session_table="synth_sessions",
                 memory_table="synth_memories",
             ),
@@ -399,14 +538,25 @@ class AIAgent:
             debug_level=2,
         )
 
-        self._current_chat_id: int | None = None
-
-        from scheduler import create_scheduler
-        self._scheduler = create_scheduler()
-
-    @property
-    def scheduler(self):
-        return self._scheduler
+    async def _extract_and_save_facts(self, message: str) -> None:
+        """Estrae fatti permanenti dal messaggio e li salva in background."""
+        try:
+            response = await self._fact_extractor.arun(message)
+            raw = (response.content or "").strip()
+            # Trova il blocco JSON anche se l'LLM aggiunge testo extra
+            start = raw.find("[")
+            end = raw.rfind("]")
+            if start == -1 or end == -1:
+                return
+            import json
+            facts: list[str] = json.loads(raw[start:end + 1])
+            for fact in facts:
+                fact = fact.strip()
+                if fact and not memory_store.fact_exists(fact):
+                    memory_store.save_fact(fact, source="auto")
+                    logger.info("Fatto salvato automaticamente: %r", fact)
+        except Exception:
+            logger.debug("Estrazione fatti fallita (non bloccante)", exc_info=True)
 
     def reset_user_sessions(self, user_id: int) -> None:
         """Cancella le sessioni di ArchitectAgent, SynthAgent e Team per l'utente."""
@@ -516,7 +666,7 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
         members: list[Agent] = []
         for spec in plan.agents:
             if spec.name == "SynthAgent":
-                members.append(self._synth_agent)
+                members.append(self._make_synth_agent())
             elif not spec.is_pure_llm and spec.name == "SchedulerAgent":
                 members.append(self._make_scheduler_agent())
             elif not spec.is_pure_llm and spec.name in _AGENT_CATALOG:
@@ -606,6 +756,17 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
         on_event: Callable[[str], Coroutine[Any, Any, None]] | None = None,
     ) -> tuple[str, list[File]]:
         self._current_chat_id = chat_id
+
+        # 0. Gestione memoria a lungo termine
+        explicit_fact = _extract_explicit_fact(message)
+        if explicit_fact:
+            if not memory_store.fact_exists(explicit_fact):
+                memory_store.save_fact(explicit_fact, source="explicit")
+                logger.info("Fatto esplicito salvato: %r", explicit_fact)
+        else:
+            # Estrazione automatica in background (non blocca la risposta)
+            import asyncio
+            asyncio.create_task(self._extract_and_save_facts(message))
 
         # 1. Architetto analizza la richiesta e produce il piano
         now = datetime.now(_TZ)

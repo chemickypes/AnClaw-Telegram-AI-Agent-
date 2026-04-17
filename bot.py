@@ -106,11 +106,13 @@ class TelegramBot:
             load_jobs_from_db(scheduler)
             set_executor_context(agent, app)
             await app.bot.set_my_commands([
-                BotCommand("start",   "Messaggio di benvenuto"),
-                BotCommand("help",    "Guida all'uso del bot"),
-                BotCommand("sveglie", "Elenca le sveglie attive"),
-                BotCommand("status",  "Modalità bot, sveglie e sessioni in memoria"),
-                BotCommand("reset",   "Cancella la memoria di sessione"),
+                BotCommand("start",    "Messaggio di benvenuto"),
+                BotCommand("help",     "Guida all'uso del bot"),
+                BotCommand("sveglie",  "Elenca le sveglie attive"),
+                BotCommand("note",     "Mostra e gestisci gli appunti salvati"),
+                BotCommand("ricordi",  "Mostra e gestisci i fatti memorizzati su di te"),
+                BotCommand("status",   "Modalità bot, sveglie e sessioni in memoria"),
+                BotCommand("reset",    "Cancella la memoria di sessione"),
             ])
             logger.info("APScheduler avviato e sveglie caricate dal DB.")
 
@@ -137,11 +139,13 @@ class TelegramBot:
             user_filter = filters.ALL
             logger.warning("ALLOWED_USER_IDS non impostato: il bot risponde a tutti gli utenti.")
 
-        self.app.add_handler(CommandHandler("start", self._handle_start, filters=user_filter))
-        self.app.add_handler(CommandHandler("help", self._handle_help, filters=user_filter))
-        self.app.add_handler(CommandHandler("reset", self._handle_reset, filters=user_filter))
-        self.app.add_handler(CommandHandler("status", self._handle_status, filters=user_filter))
+        self.app.add_handler(CommandHandler("start",   self._handle_start,   filters=user_filter))
+        self.app.add_handler(CommandHandler("help",    self._handle_help,    filters=user_filter))
+        self.app.add_handler(CommandHandler("reset",   self._handle_reset,   filters=user_filter))
+        self.app.add_handler(CommandHandler("status",  self._handle_status,  filters=user_filter))
         self.app.add_handler(CommandHandler("sveglie", self._handle_sveglie, filters=user_filter))
+        self.app.add_handler(CommandHandler("note",    self._handle_note,    filters=user_filter))
+        self.app.add_handler(CommandHandler("ricordi", self._handle_ricordi, filters=user_filter))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, self._handle_message)
         )
@@ -164,6 +168,14 @@ class TelegramBot:
         # Callback dai bottoni inline delle sveglie
         self.app.add_handler(
             CallbackQueryHandler(self._handle_schedule_callback, pattern=r"^sched_(del|ref):")
+        )
+        # Callback dai bottoni inline dei ricordi
+        self.app.add_handler(
+            CallbackQueryHandler(self._handle_memory_callback, pattern=r"^mem_del:")
+        )
+        # Callback dai bottoni inline delle note
+        self.app.add_handler(
+            CallbackQueryHandler(self._handle_note_callback, pattern=r"^note_del:")
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -290,11 +302,127 @@ class TelegramBot:
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
+    async def _handle_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from datetime import datetime as _dt
+        from notes_store import get_all_notes
+
+        notes = get_all_notes()
+        if not notes:
+            await update.message.reply_text(
+                "Non hai ancora nessun appunto salvato.\n\n"
+                "Puoi aggiungerne uno con:\n"
+                "_\"Nota: chiamare il dentista\"_",
+                parse_mode="Markdown",
+            )
+            return
+
+        lines = ["*I tuoi appunti:*\n"]
+        keyboard = []
+        for note_id, content, created_at in notes:
+            try:
+                dt = _dt.fromisoformat(created_at).strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                dt = created_at[:16]
+            preview = content[:60] + ("…" if len(content) > 60 else "")
+            lines.append(f"*[{note_id}]* {preview}  _({dt})_")
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🗑 Elimina [{note_id}]: {content[:30]}{'…' if len(content) > 30 else ''}",
+                    callback_data=f"note_del:{note_id}",
+                )
+            ])
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def _handle_note_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Gestisce il pulsante di cancellazione di una nota."""
+        query = update.callback_query
+        await query.answer()
+
+        _, note_id_str = query.data.split(":", 1)
+        from notes_store import delete_note
+        deleted = delete_note(int(note_id_str))
+
+        await query.edit_message_reply_markup(reply_markup=None)
+        if deleted:
+            await query.message.reply_text(f"Nota {note_id_str} eliminata.")
+        else:
+            await query.message.reply_text(f"Nota {note_id_str} non trovata (forse già eliminata).")
+
+    async def _handle_ricordi(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from datetime import datetime as _dt
+        from memory_store import get_all_facts
+
+        facts = get_all_facts()
+        if not facts:
+            await update.message.reply_text(
+                "Non ho ancora memorizzato nessun fatto su di te.\n\n"
+                "Puoi dirmi qualcosa con:\n"
+                "_\"Ricordati che abito a Milano\"_",
+                parse_mode="Markdown",
+            )
+            return
+
+        lines = ["*Fatti che ricordo su di te:*\n"]
+        keyboard = []
+        for fact_id, fact, source, created_at in facts:
+            try:
+                dt = _dt.fromisoformat(created_at).strftime("%d/%m/%Y")
+            except Exception:
+                dt = created_at[:10]
+            tag = "📌" if source == "explicit" else "🔍"
+            lines.append(f"{tag} _{fact}_ ({dt})")
+            keyboard.append([
+                InlineKeyboardButton(f"🗑 Dimentica: {fact[:30]}{'…' if len(fact) > 30 else ''}",
+                                     callback_data=f"mem_del:{fact_id}")
+            ])
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def _handle_memory_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Gestisce il pulsante di cancellazione di un fatto memorizzato."""
+        query = update.callback_query
+        await query.answer()
+
+        _, fact_id_str = query.data.split(":", 1)
+        from memory_store import delete_fact
+        deleted = delete_fact(int(fact_id_str))
+
+        await query.edit_message_reply_markup(reply_markup=None)
+        if deleted:
+            await query.message.reply_text("Fatto dimenticato.", parse_mode="Markdown")
+        else:
+            await query.message.reply_text("Fatto non trovato (forse già eliminato).")
+
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text
         logger.info(f"Testo ricevuto da {update.effective_user.id}: {text!r}")
 
         # Aggiungi hint di scheduling se rilevato, per aiutare l'Architetto a instradare
+        from agent import _extract_explicit_fact, _extract_quick_note
+        if _extract_explicit_fact(text):
+            # Fatto esplicito: risposta diretta senza passare per il team
+            await update.message.reply_text("Fatto memorizzato.", parse_mode="Markdown")
+            return
+
+        quick_note = _extract_quick_note(text)
+        if quick_note is not None:
+            # Nota rapida: salva direttamente senza passare per il team
+            from notes_store import save_note
+            note_id = save_note(quick_note)
+            await update.message.reply_text(
+                f"Nota salvata (ID: {note_id}).", parse_mode="Markdown"
+            )
+            return
+
         if _is_scheduling_hint(text):
             text = f"[HINT: possibile richiesta di gestione sveglie/scheduling]\n{text}"
 
