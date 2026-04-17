@@ -1,172 +1,175 @@
 # AnClaw — Telegram AI Agent
 
-Assistente AI personale su Telegram, costruito con [agno](https://github.com/agno-agi/agno) e Google Gemini.
+A personal AI assistant on Telegram, built with [agno](https://github.com/agno-agi/agno) and Google Gemini.
 
-## Idea di fondo
+## The idea
 
-La maggior parte dei bot AI ha un team di agenti fisso, pensato a priori per gestire qualsiasi tipo di richiesta. AnClaw funziona diversamente: ogni messaggio ricevuto viene prima analizzato da un **agente Architetto**, che decide dinamicamente quale team assembler e con quale strategia.
+Most AI bots have a fixed set of agents defined upfront to handle any kind of request. AnClaw works differently: every incoming message is first analyzed by an **Architect agent**, which dynamically decides what team to assemble and what strategy to use.
 
-Il risultato è un sistema che non spreca risorse su task semplici (risposta diretta) e che scala automaticamente su quelli complessi (ricerca + scraping + sintesi), senza che l'utente debba fare nulla di diverso dal mandare un messaggio.
+The result is a system that doesn't waste resources on simple tasks (direct answer) and automatically scales up for complex ones (search + scraping + synthesis) — without the user doing anything different from just sending a message.
 
-### Flusso di esecuzione
+### Execution flow
 
 ```
-Utente → Telegram
-           │
-           ▼
-    ArchitectAgent  (Gemini 2.5 Pro)
-    Analizza la richiesta e produce un piano JSON:
-    - quale modalità usare (route / coordinate / broadcast)
-    - quali agenti coinvolgere
-    - un messaggio intermedio da mostrare all'utente
-           │
-           ▼
-    Team dinamico  (agno Team, runtime)
-    Costruito al volo in base al piano
-           │
-    ┌──────┴──────────────────────────────┐
-    │  Agenti disponibili nel catalogo:   │
-    │  • SearchAgent   (web, HN, Reddit)  │
-    │  • ScraperAgent  (browser + crawl)  │
-    │  • YouTubeAgent  (video + transcript)│
-    │  • FileAgent     (PDF, CSV, …)      │
-    │  • SchedulerAgent (sveglie cron)    │
-    │  • SynthAgent    (sintesi finale)   │
-    └─────────────────────────────────────┘
-           │
-           ▼
-    Risposta → Telegram
+User → Telegram
+          │
+          ▼
+   ArchitectAgent  (Gemini 2.5 Pro)
+   Analyzes the request and produces a JSON plan:
+   - which mode to use (route / coordinate / broadcast)
+   - which agents to involve
+   - an intermediate status message to show the user
+          │
+          ▼
+   Dynamic team  (agno Team, built at runtime)
+          │
+   ┌──────┴──────────────────────────────────┐
+   │  Available agents in the catalog:       │
+   │  • SearchAgent    (web, HN, Reddit)     │
+   │  • ScraperAgent   (browser + crawl)     │
+   │  • YouTubeAgent   (video + transcripts) │
+   │  • FileAgent      (PDF, CSV, …)         │
+   │  • SchedulerAgent (cron schedules)      │
+   │  • SynthAgent     (final synthesis)     │
+   └─────────────────────────────────────────┘
+          │
+          ▼
+   Response → Telegram
 ```
 
-### Modalità del team
+### Team modes
 
-| Modalità | Quando | Esempio |
+| Mode | When | Example |
 |---|---|---|
-| `route` | Task semplice, un solo agente | Fatto storico, generazione file |
-| `coordinate` | Pipeline sequenziale | Ricerca → Scraping → Sintesi |
-| `broadcast` | Task paralleli indipendenti | — |
+| `route` | Single-agent task | Historical fact, file generation |
+| `coordinate` | Sequential pipeline | Search → Scrape → Synthesize |
+| `broadcast` | Independent parallel tasks | — |
 
-### Memoria di sessione
+### Session memory
 
-- **ArchitectAgent** ricorda la conversazione per mantenere il contesto nelle richieste successive.
-- **SynthAgent** tiene traccia della conversazione per gestire i follow-up ("e quello precedente?").
-- La persistenza usa SQLite (`tmp/agent_data.db`).
+- **ArchitectAgent** remembers the conversation to maintain context across follow-up requests.
+- **SynthAgent** tracks the conversation to handle follow-ups ("and the previous one?").
+- Persistence is handled via SQLite (`tmp/agent_data.db`).
 
-### Sveglie ricorrenti
+### Recurring schedules
 
-L'agente supporta task programmati via cron. Puoi dire ad esempio:
+The agent supports cron-based scheduled tasks. You can say, for example:
 
-> "Ogni mattina alle 8 mandami le top 10 notizie di Hacker News"
+> "Every morning at 8 send me the top 10 Hacker News stories"
 
-Lo SchedulerAgent crea la sveglia, l'Architetto pre-baked il piano di esecuzione e APScheduler esegue il task all'orario stabilito, inviando il risultato direttamente in chat.
+The SchedulerAgent creates the schedule, the Architect pre-bakes the execution plan, and APScheduler fires the task at the given time, sending the result directly to the chat.
 
 ---
 
-## Stack tecnico
+## Tech stack
 
-| Componente | Tecnologia |
+| Component | Technology |
 |---|---|
-| Framework agenti | [agno](https://github.com/agno-agi/agno) |
-| Modelli AI | Google Gemini 2.5 Pro / Flash |
-| Trascrizione audio | Gemini 2.5 Flash (API nativa) |
-| Bot Telegram | python-telegram-bot v21 |
+| Agent framework | [agno](https://github.com/agno-agi/agno) |
+| AI models | Google Gemini 2.5 Pro / Flash |
+| Audio transcription | Gemini 2.5 Flash (native API) |
+| Telegram bot | python-telegram-bot v21 |
 | Scheduler | APScheduler (AsyncIO) |
-| Persistenza | SQLite via SQLAlchemy |
+| Persistence | SQLite via SQLAlchemy |
 
 ---
 
-## Requisiti
+## Requirements
 
 - Python 3.11+
-- Account Google AI Studio (per la `GOOGLE_API_KEY`)
-- Un bot Telegram creato via [@BotFather](https://t.me/BotFather) (per il `TELEGRAM_BOT_TOKEN`)
+- A Google AI Studio account (for `GOOGLE_API_KEY`)
+- A Telegram bot created via [@BotFather](https://t.me/BotFather) (for `TELEGRAM_BOT_TOKEN`)
 
 ---
 
-## Esecuzione locale
+## Running locally
 
-### 1. Clona il repository
+### 1. Clone the repository
 
 ```bash
 git clone <repo-url>
 cd anclaw_telegram_agent
 ```
 
-### 2. Crea e attiva il virtualenv
+### 2. Create and activate a virtual environment
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 ```
 
-### 3. Installa le dipendenze
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-> **Nota:** `crawl4ai` richiede l'installazione dei browser Playwright al primo utilizzo:
+> **Note:** `crawl4ai` requires Playwright browsers to be installed on first use:
 > ```bash
 > crawl4ai-setup
 > ```
 
-### 4. Configura le variabili d'ambiente
+### 4. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Apri `.env` e compila:
+Open `.env` and fill in:
 
-| Variabile | Descrizione |
+| Variable | Description |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | Token del bot ottenuto da @BotFather |
-| `GOOGLE_API_KEY` | Chiave da [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| `ALLOWED_USER_IDS` | Il tuo ID Telegram (es. `12345678`). Trovi il tuo ID scrivendo a [@userinfobot](https://t.me/userinfobot) |
-| `BOT_MODE` | `polling` per lo sviluppo locale (default) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `GOOGLE_API_KEY` | Key from [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `ALLOWED_USER_IDS` | Your Telegram user ID (e.g. `12345678`). Find it by messaging [@userinfobot](https://t.me/userinfobot) |
+| `BOT_MODE` | `polling` for local development (default) |
 
-Le variabili webhook sono necessarie solo in produzione (`BOT_MODE=webhook`).
+Webhook variables are only required in production (`BOT_MODE=webhook`).
 
-### 5. Avvia il bot
+### 5. Start the bot
 
 ```bash
 python main.py
 ```
 
-Il bot risponderà ai messaggi degli utenti nella whitelist. Per testarlo, apri Telegram e scrivi al tuo bot.
+The bot will respond to messages from whitelisted users. Open Telegram and write to your bot to test it.
 
 ---
 
-## Struttura del progetto
+## Project structure
 
 ```
 anclaw_telegram_agent/
-├── main.py          # Entry point: setup logging, avvio bot
-├── bot.py           # Handler Telegram (testo, voce, foto, documenti, callback)
-├── agent.py         # AIAgent: Architetto + catalogo agenti + logica team dinamico
-├── config.py        # Configurazione da variabili d'ambiente
-├── scheduler.py     # Sveglie ricorrenti: APScheduler + SQLite store + tools
-├── transcriber.py   # Trascrizione audio tramite Gemini
-├── sender.py        # TelegramSender: invio proattivo di messaggi e file
+├── main.py          # Entry point: logging setup, bot startup
+├── bot.py           # Telegram handlers (text, voice, photos, documents, callbacks)
+├── agent.py         # AIAgent: Architect + agent catalog + dynamic team logic
+├── config.py        # Configuration from environment variables
+├── scheduler.py     # Recurring schedules: APScheduler + SQLite store + tools
+├── transcriber.py   # Audio transcription via Gemini
+├── sender.py        # TelegramSender: proactive message and file delivery
 ├── requirements.txt
 ├── .env.example
-└── tmp/             # Generato a runtime: DB SQLite, file generati dagli agenti
+└── tmp/             # Created at runtime: SQLite DB, files generated by agents
 ```
 
 ---
 
-## Modalità webhook (produzione)
+## Webhook mode (production)
 
-Per eseguire in produzione con webhook invece del polling:
+To run in production with webhooks instead of polling:
 
-1. Imposta `BOT_MODE=webhook` nel `.env`
-2. Configura `WEBHOOK_URL` con il tuo dominio HTTPS pubblico
-3. In sviluppo puoi usare [ngrok](https://ngrok.com/): `ngrok http 8443`
+1. Set `BOT_MODE=webhook` in `.env`
+2. Set `WEBHOOK_URL` to your public HTTPS domain
+3. For local testing you can use [ngrok](https://ngrok.com/): `ngrok http 8443`
 
-Telegram accetta solo le porte: `443`, `80`, `88`, `8443`.
+Telegram only accepts ports: `443`, `80`, `88`, `8443`.
 
 ---
 
-## Autore
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
+## Author
 
 Angelo Moroni — [mor.angelo.mor@gmail.com](mailto:mor.angelo.mor@gmail.com)
