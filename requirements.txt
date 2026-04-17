@@ -1,0 +1,10 @@
+python-telegram-bot==21.*
+python-dotenv>=1.0.0
+agno>=1.0.0
+google-genai>=1.0.0
+duckduckgo-search>=6.0.0
+crawl4ai>=0.4.0
+youtube-transcript-api>=0.6.0
+praw>=7.7.0
+apscheduler>=3.10.0
+sqlalchemy>=2.0.0
