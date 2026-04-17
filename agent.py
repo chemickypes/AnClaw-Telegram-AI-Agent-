@@ -57,6 +57,9 @@ _TOOL_LABELS: dict[str, str] = {
     "search_youtube_videos": "YouTube",
     "get_youtube_video_captions": "YouTube",
     "generate_file": "generazione file",
+    "execute_math": "calcolo matematico",
+    "search_in_file": "analisi file",
+    "filter_file_rows": "filtraggio dati",
     "create_schedule": "creazione sveglia",
     "list_schedules": "lista sveglie",
     "delete_schedule": "eliminazione sveglia",
@@ -183,6 +186,33 @@ def _make_file_agent() -> Agent:
     )
 
 
+def _make_code_agent() -> Agent:
+    from code_tools import execute_math, search_in_file, filter_file_rows
+    return Agent(
+        name="CodeAgent",
+        role=(
+            "Esegue operazioni matematiche/statistiche e analisi su file CSV/Excel "
+            "in un ambiente Python ristretto e sicuro."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + " Sei l'agente di esecuzione codice di AnClaw.\n\n"
+            "Usa execute_math per calcoli matematici e statistici: scrivi codice Python "
+            "che assegna il risultato alla variabile 'result'.\n"
+            "Usa search_in_file per cercare righe in un file CSV/Excel dato il path "
+            "indicato nel messaggio (es. [FILE SALVATO: path]).\n"
+            "Usa filter_file_rows per filtrare righe con una condizione Python: "
+            "il codice riceve 'rows' (lista di dict) e deve scrivere in 'result'.\n\n"
+            "Moduli math e statistics sono disponibili nel codice ristretto.\n"
+            "Presenta sempre il risultato in modo chiaro e comprensibile."
+        ),
+        tools=[execute_math, search_in_file, filter_file_rows],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 def _make_calendar_agent() -> Agent:
     from calendar_tools import list_events, create_event, delete_event
     return Agent(
@@ -211,6 +241,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "YouTubeAgent": _make_youtube_agent,
     "FileAgent": _make_file_agent,
     "CalendarAgent": _make_calendar_agent,
+    "CodeAgent": _make_code_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -220,7 +251,9 @@ _CATALOG_DESCRIPTIONS = (
     "- YouTubeAgent: analisi video YouTube, trascrizioni, ricerca canali\n"
     "- FileAgent: generazione di file (PDF, CSV, testo, ecc.)\n"
     "- SchedulerAgent: gestione sveglie e task ricorrenti (crea, lista, elimina, refresh piano)\n"
-    "- CalendarAgent: lettura e gestione calendario Google (leggi eventi, crea eventi, elimina eventi)"
+    "- CalendarAgent: lettura e gestione calendario Google (leggi eventi, crea eventi, elimina eventi)\n"
+    "- CodeAgent: esegue operazioni matematiche/statistiche e analisi su file CSV/Excel "
+    "(usa RestrictedPython — sicuro, nessun accesso a filesystem o internet)"
 )
 
 
@@ -272,7 +305,14 @@ REGOLE DI ROUTING:
 6. CALENDARIO GOOGLE (leggere eventi, aggiungere appuntamenti, eliminare eventi):
    → route: [CalendarAgent] da solo
 
-8. CRAWLING DI URL SPECIFICI già noti:
+7. CALCOLI MATEMATICI, statistiche, operazioni numeriche:
+   → route: [CodeAgent] da solo
+
+8. ANALISI DI FILE CSV o EXCEL (ricerca di righe/valori, filtri su dati):
+   Il messaggio contiene [FILE SALVATO: path] quando l'utente ha allegato un file.
+   → route: [CodeAgent] da solo
+
+9. CRAWLING DI URL SPECIFICI già noti:
    → coordinate: [ScraperAgent → SynthAgent]
 
 REGOLE GENERALI:
