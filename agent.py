@@ -67,6 +67,10 @@ _TOOL_LABELS: dict[str, str] = {
     "list_schedules": "lista sveglie",
     "delete_schedule": "eliminazione sveglia",
     "refresh_schedule": "aggiornamento sveglia",
+    "create_reminder": "creazione promemoria",
+    "create_calendar_reminder": "creazione promemoria calendario",
+    "list_reminders": "lista promemoria",
+    "delete_reminder": "eliminazione promemoria",
     "list_events": "lettura calendario",
     "create_event": "creazione evento calendario",
     "delete_event": "eliminazione evento calendario",
@@ -337,6 +341,41 @@ def _make_notes_agent() -> Agent:
     )
 
 
+def _make_reminder_agent(scheduler, get_chat_id) -> Agent:
+    from scheduler import make_reminder_tools
+    tools = make_reminder_tools(scheduler=scheduler, get_chat_id=get_chat_id)
+    return Agent(
+        name="ReminderAgent",
+        role="Gestione promemoria one-shot: crea, lista ed elimina promemoria con scatto singolo, anche collegati a eventi calendario.",
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + """
+Sei l'agente dei promemoria one-shot di AnClaw.
+
+Per CREARE un promemoria generico:
+1. Estrai il messaggio da inviare e la data/ora dalla richiesta
+2. Converti la data/ora in formato ISO 8601 (es. "2026-04-20T09:00:00") nel fuso Europe/Rome
+3. Chiama create_reminder(message, fire_at_iso)
+
+Per CREARE un promemoria da un evento calendario:
+1. Identifica il titolo o ID dell'evento nella richiesta
+2. Chiama create_calendar_reminder(event_title_or_id, message, minutes_before)
+   - minutes_before default: 10
+   - message: lascia vuoto per usare il titolo dell'evento
+
+Per LISTARE chiama list_reminders().
+Per ELIMINARE chiama delete_reminder(reminder_id).
+
+Conferma sempre all'utente l'azione eseguita con data e ora formattate in italiano.
+"""
+        ),
+        tools=tools,
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "SearchAgent": _make_search_agent,
     "ScraperAgent": _make_scraper_agent,
@@ -354,6 +393,7 @@ _CATALOG_DESCRIPTIONS = (
     "- YouTubeAgent: analisi video YouTube, trascrizioni, ricerca canali\n"
     "- FileAgent: generazione di file (PDF, CSV, testo, ecc.)\n"
     "- SchedulerAgent: gestione sveglie e task ricorrenti (crea, lista, elimina, refresh piano)\n"
+    "- ReminderAgent: gestione promemoria one-shot (scatto unico a data/ora precisa, anche collegati a eventi calendario)\n"
     "- CalendarAgent: lettura e gestione calendario Google (leggi eventi, crea eventi, elimina eventi)\n"
     "- CodeAgent: esegue operazioni matematiche/statistiche e analisi su file CSV/Excel "
     "(usa RestrictedPython — sicuro, nessun accesso a filesystem o internet)\n"
@@ -405,6 +445,11 @@ REGOLE DI ROUTING:
 
 5. GESTIONE SVEGLIE E TASK RICORRENTI:
    → route: [SchedulerAgent] da solo
+
+5b. PROMEMORIA ONE-SHOT (ricordami, promemoria, avvisami, notifica tra X minuti/ore, prima di un evento):
+   Il messaggio contiene "promemoria", "ricordami", "avvisami", "notificami", "reminder",
+   o un riferimento a un orario preciso con richiesta di notifica singola.
+   → route: [ReminderAgent] da solo
 
 6. CALENDARIO GOOGLE (leggere eventi, aggiungere appuntamenti, eliminare eventi):
    → route: [CalendarAgent] da solo
@@ -465,7 +510,7 @@ class AIAgent:
 
         self._architect = Agent(
             name="ArchitectAgent",
-            model=Gemini(id="gemini-2.5-flash"),
+            model=Gemini(id="gemini-2.5-flash", generation_config={"temperature": 0.2}),
             instructions=_ARCHITECT_INSTRUCTIONS,
             output_schema=ArchitectPlan,
             db=SqliteDb(
@@ -669,6 +714,11 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
                 members.append(self._make_synth_agent())
             elif not spec.is_pure_llm and spec.name == "SchedulerAgent":
                 members.append(self._make_scheduler_agent())
+            elif not spec.is_pure_llm and spec.name == "ReminderAgent":
+                members.append(_make_reminder_agent(
+                    scheduler=self._scheduler,
+                    get_chat_id=lambda: self._current_chat_id,
+                ))
             elif not spec.is_pure_llm and spec.name in _AGENT_CATALOG:
                 members.append(_AGENT_CATALOG[spec.name]())
             else:

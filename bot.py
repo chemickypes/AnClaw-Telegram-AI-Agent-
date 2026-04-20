@@ -73,7 +73,7 @@ def _chunk_text(text: str, max_length: int = _TELEGRAM_MAX_LENGTH) -> list[str]:
     return [c for c in chunks if c]
 
 
-# Parole chiave che suggeriscono una richiesta di scheduling
+# Parole chiave che suggeriscono una richiesta di scheduling o promemoria
 _SCHEDULING_KEYWORDS = frozenset({
     "imposta", "metti", "programma", "sveglia", "promemoria",
     "ricordami", "ricorda", "schedula", "schedule",
@@ -84,10 +84,21 @@ _SCHEDULING_KEYWORDS = frozenset({
     "lista sveglie", "mostra sveglie", "elimina sveglia", "cancella sveglia",
 })
 
+_REMINDER_KEYWORDS = frozenset({
+    "promemoria", "ricordami", "avvisami", "notificami", "reminder",
+    "avviso", "notifica", "tra ", "prima dell", "prima di",
+    "lista promemoria", "mostra promemoria", "elimina promemoria", "cancella promemoria",
+})
+
 
 def _is_scheduling_hint(text: str) -> bool:
     lower = text.lower()
     return any(kw in lower for kw in _SCHEDULING_KEYWORDS)
+
+
+def _is_reminder_hint(text: str) -> bool:
+    lower = text.lower()
+    return any(kw in lower for kw in _REMINDER_KEYWORDS)
 
 
 class TelegramBot:
@@ -101,20 +112,23 @@ class TelegramBot:
 
         async def _post_init(app: Application) -> None:
             from scheduler import init_schedules_table, load_jobs_from_db, set_executor_context
+            from reminders_store import init_reminders_table
             init_schedules_table()
+            init_reminders_table()
             scheduler.start()
             load_jobs_from_db(scheduler)
             set_executor_context(agent, app)
             await app.bot.set_my_commands([
-                BotCommand("start",    "Messaggio di benvenuto"),
-                BotCommand("help",     "Guida all'uso del bot"),
-                BotCommand("sveglie",  "Elenca le sveglie attive"),
-                BotCommand("note",     "Mostra e gestisci gli appunti salvati"),
-                BotCommand("ricordi",  "Mostra e gestisci i fatti memorizzati su di te"),
-                BotCommand("status",   "Modalità bot, sveglie e sessioni in memoria"),
-                BotCommand("reset",    "Cancella la memoria di sessione"),
+                BotCommand("start",      "Messaggio di benvenuto"),
+                BotCommand("help",       "Guida all'uso del bot"),
+                BotCommand("sveglie",    "Elenca le sveglie attive"),
+                BotCommand("promemoria", "Elenca i promemoria one-shot attivi"),
+                BotCommand("note",       "Mostra e gestisci gli appunti salvati"),
+                BotCommand("ricordi",    "Mostra e gestisci i fatti memorizzati su di te"),
+                BotCommand("status",     "Modalità bot, sveglie e sessioni in memoria"),
+                BotCommand("reset",      "Cancella la memoria di sessione"),
             ])
-            logger.info("APScheduler avviato e sveglie caricate dal DB.")
+            logger.info("APScheduler avviato, sveglie e promemoria caricati dal DB.")
 
         async def _post_shutdown(app: Application) -> None:
             if scheduler.running:
@@ -139,13 +153,14 @@ class TelegramBot:
             user_filter = filters.ALL
             logger.warning("ALLOWED_USER_IDS non impostato: il bot risponde a tutti gli utenti.")
 
-        self.app.add_handler(CommandHandler("start",   self._handle_start,   filters=user_filter))
-        self.app.add_handler(CommandHandler("help",    self._handle_help,    filters=user_filter))
-        self.app.add_handler(CommandHandler("reset",   self._handle_reset,   filters=user_filter))
-        self.app.add_handler(CommandHandler("status",  self._handle_status,  filters=user_filter))
-        self.app.add_handler(CommandHandler("sveglie", self._handle_sveglie, filters=user_filter))
-        self.app.add_handler(CommandHandler("note",    self._handle_note,    filters=user_filter))
-        self.app.add_handler(CommandHandler("ricordi", self._handle_ricordi, filters=user_filter))
+        self.app.add_handler(CommandHandler("start",      self._handle_start,      filters=user_filter))
+        self.app.add_handler(CommandHandler("help",       self._handle_help,       filters=user_filter))
+        self.app.add_handler(CommandHandler("reset",      self._handle_reset,      filters=user_filter))
+        self.app.add_handler(CommandHandler("status",     self._handle_status,     filters=user_filter))
+        self.app.add_handler(CommandHandler("sveglie",    self._handle_sveglie,    filters=user_filter))
+        self.app.add_handler(CommandHandler("promemoria", self._handle_promemoria, filters=user_filter))
+        self.app.add_handler(CommandHandler("note",       self._handle_note,       filters=user_filter))
+        self.app.add_handler(CommandHandler("ricordi",    self._handle_ricordi,    filters=user_filter))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND & user_filter, self._handle_message)
         )
@@ -176,6 +191,10 @@ class TelegramBot:
         # Callback dai bottoni inline delle note
         self.app.add_handler(
             CallbackQueryHandler(self._handle_note_callback, pattern=r"^note_del:")
+        )
+        # Callback dai bottoni inline dei promemoria
+        self.app.add_handler(
+            CallbackQueryHandler(self._handle_reminder_callback, pattern=r"^rem_del:")
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -302,6 +321,54 @@ class TelegramBot:
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
+    async def _handle_promemoria(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from datetime import datetime as _dt
+        from reminders_store import get_all_reminders
+        from zoneinfo import ZoneInfo as _ZI
+
+        _TZ = _ZI("Europe/Rome")
+        rows = get_all_reminders()
+        if not rows:
+            await update.message.reply_text("Nessun promemoria attivo al momento.")
+            return
+
+        lines = ["*Promemoria attivi:*\n"]
+        keyboard = []
+        for rid, message, fire_at_iso, _, cal_title, _ in rows:
+            try:
+                dt = _dt.fromisoformat(fire_at_iso).astimezone(_TZ).strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                dt = fire_at_iso[:16]
+            cal_tag = f" 📅 _{cal_title}_" if cal_title else ""
+            preview = message[:60] + ("…" if len(message) > 60 else "")
+            lines.append(f"⏰ {dt}{cal_tag}\n   {preview}\n   ID: `{rid}`\n")
+            keyboard.append([
+                InlineKeyboardButton(f"🗑 Elimina {rid}", callback_data=f"rem_del:{rid}"),
+            ])
+
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def _handle_reminder_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Gestisce il pulsante di cancellazione di un promemoria."""
+        query = update.callback_query
+        await query.answer()
+
+        _, reminder_id = query.data.split(":", 1)
+        from reminders_store import delete_reminder
+        from scheduler import _remove_reminder_job
+        deleted = delete_reminder(reminder_id)
+        _remove_reminder_job(self.agent.scheduler, reminder_id)
+
+        await query.edit_message_reply_markup(reply_markup=None)
+        if deleted:
+            await query.message.reply_text(f"Promemoria `{reminder_id}` eliminato.", parse_mode="Markdown")
+        else:
+            await query.message.reply_text(f"Promemoria `{reminder_id}` non trovato (forse già eliminato).")
+
     async def _handle_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from datetime import datetime as _dt
         from notes_store import get_all_notes
@@ -423,7 +490,9 @@ class TelegramBot:
             )
             return
 
-        if _is_scheduling_hint(text):
+        if _is_reminder_hint(text):
+            text = f"[HINT: possibile richiesta di promemoria one-shot]\n{text}"
+        elif _is_scheduling_hint(text):
             text = f"[HINT: possibile richiesta di gestione sveglie/scheduling]\n{text}"
 
         await self._process_and_reply(update, context, text)

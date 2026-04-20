@@ -130,6 +130,48 @@ def create_event(
         return f"Errore nella creazione dell'evento: {e}"
 
 
+def get_event_by_title_or_id(query: str) -> dict | None:
+    """
+    Cerca un evento futuro per titolo (sottostringa, case-insensitive) o ID esatto.
+    Ritorna il primo match trovato nei prossimi 60 giorni, oppure None.
+    """
+    try:
+        service = _get_service()
+        now = datetime.now(_TZ)
+
+        # Prova prima come ID esatto
+        try:
+            event = service.events().get(calendarId="primary", eventId=query).execute()
+            if event.get("status") != "cancelled":
+                return event
+        except Exception:
+            pass
+
+        # Cerca per titolo nei prossimi 60 giorni
+        time_max = (now + timedelta(days=60)).isoformat()
+        result = service.events().list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=50,
+        ).execute()
+
+        lower_query = query.lower()
+        for ev in result.get("items", []):
+            if ev.get("status") == "cancelled":
+                continue
+            title = ev.get("summary", "")
+            if lower_query in title.lower():
+                return ev
+
+        return None
+    except Exception:
+        logger.exception("Errore nella ricerca dell'evento: %r", query)
+        return None
+
+
 def delete_event(event_id: str) -> str:
     """
     Elimina un evento dal calendario Google dato il suo ID.
