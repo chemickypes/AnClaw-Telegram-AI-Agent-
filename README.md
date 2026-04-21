@@ -31,6 +31,7 @@ User → Telegram
    │  • FileAgent      (PDF, CSV, …)         │
    │  • SchedulerAgent  (cron schedules)     │
    │  • CalendarAgent   (Google Calendar)    │
+   │  • DriveAgent      (Google Drive)       │
    │  • CodeAgent       (math + CSV/Excel)   │
    │  • NotesAgent      (personal notes)     │
    │  • SynthAgent      (final synthesis)    │
@@ -128,6 +129,22 @@ The CalendarAgent reads and writes events on your Google Calendar. Examples:
 
 ---
 
+### Google Drive integration
+
+The **DriveAgent** lets you interact with your Google Drive using natural language. Available operations:
+
+| Operation | Example |
+|---|---|
+| Search files | "Cerca il file budget su Drive" |
+| Read content | "Leggi il documento 'Note riunione'" |
+| Download file | "Scaricami il PDF del contratto" |
+| Create text file | "Crea un file 'todo.txt' con queste note" |
+| Upload file | _Send a file on Telegram_ → "Caricalo su Drive" |
+
+Supported file types for reading: Google Docs, Google Sheets, Google Slides (exported as plain text/CSV), plain text, and other text-based formats. Binary files (images, compiled files) can be downloaded but not read as text.
+
+---
+
 ## Bot commands
 
 | Command | Description |
@@ -153,6 +170,7 @@ The CalendarAgent reads and writes events on your Google Calendar. Examples:
 | Scheduler | APScheduler (AsyncIO) |
 | Persistence | SQLite via SQLAlchemy |
 | Calendar integration | Google Calendar API v3 (OAuth 2.0) |
+| Drive integration | Google Drive API v3 (OAuth 2.0) |
 | Code sandbox | RestrictedPython + openpyxl |
 
 ---
@@ -162,7 +180,7 @@ The CalendarAgent reads and writes events on your Google Calendar. Examples:
 - Python 3.12+
 - A Google AI Studio account (for `GOOGLE_API_KEY`)
 - A Telegram bot created via [@BotFather](https://t.me/BotFather) (for `TELEGRAM_BOT_TOKEN`)
-- A Google Cloud project with the Calendar API enabled (for Google Calendar integration)
+- A Google Cloud project with the Calendar and Drive APIs enabled (for Google Calendar and Drive integrations)
 
 ---
 
@@ -216,14 +234,16 @@ Open `.env` and fill in:
 
 Webhook variables are only required in production (`BOT_MODE=webhook`).
 
-### 5. Set up Google Calendar (optional)
+### 5. Set up Google Calendar and Drive (optional)
 
-This step is required to use the CalendarAgent. Skip it if you don't need calendar integration.
+This step is required to use the CalendarAgent and/or DriveAgent. Skip it if you don't need either integration.
 
-**5a. Create a Google Cloud project and enable the Calendar API**
+**5a. Create a Google Cloud project and enable the APIs**
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project
-2. Navigate to **APIs & Services → Library**, search for `Google Calendar API`, and enable it
+2. Navigate to **APIs & Services → Library** and enable:
+   - `Google Calendar API`
+   - `Google Drive API`
 3. Go to **APIs & Services → OAuth consent screen**:
    - User type: **External**
    - Fill in app name and email; skip scopes
@@ -232,17 +252,17 @@ This step is required to use the CalendarAgent. Skip it if you don't need calend
    - Application type: **Desktop app**
    - Download the JSON file and save it as `credentials.json` in the project root
 
-**5b. Authorize calendar access (one-time)**
+**5b. Authorize access (one-time)**
 
 ```bash
-python auth_calendar.py
+python setup_google_auth.py
 ```
 
-A browser window will open. Sign in with your Google account and grant access. A `token.json` file will be saved in the project root — this is reused automatically on subsequent runs (with silent refresh).
-
-You can delete `auth_calendar.py` after this step.
+A browser window will open. Sign in with your Google account and grant access to both Calendar and Drive. A `token.json` file will be saved in the project root — this is reused automatically on subsequent runs (with silent refresh).
 
 > **Note:** Keep `credentials.json` and `token.json` out of version control (they are already in `.gitignore`).
+>
+> **Upgrading from an older token:** If you previously ran `auth_calendar.py`, the existing `token.json` only has Calendar scope. Run `setup_google_auth.py` to regenerate it with both Calendar and Drive scopes.
 
 ---
 
@@ -274,6 +294,7 @@ anclaw_telegram_agent/
 │       ├── agent_router.py        # Deterministic pre-routing (reminders, schedules, …)
 │       ├── bot.py                 # Telegram handlers (text, voice, photos, documents, callbacks)
 │       ├── calendar_tools.py      # Google Calendar tools (list/create/delete events)
+│       ├── drive_tools.py         # Google Drive tools (search, read, download, upload, create)
 │       ├── code_tools.py          # CodeAgent tools: execute_math, search_in_file, filter_file_rows
 │       ├── config.py              # Configuration from environment variables
 │       ├── memory_store.py        # Long-term user facts: save/get/delete + automatic extraction
