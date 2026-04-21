@@ -14,6 +14,7 @@ from .agent_catalog import (
     _CUTOFF,
     _base_instructions,
     _make_search_agent,
+    _make_news_search_agent,
     _make_wikipedia_agent,
     _make_rss_agent,
 )
@@ -130,11 +131,17 @@ REGOLE DI ROUTING:
 1. FATTI STORICI NOTI, definizioni, concetti stabili e consolidati (es. "chi ha ucciso John Lennon", "cos'è la fotosintesi"):
    → route: [SynthAgent] da solo — risponde direttamente con la sua conoscenza
 
-2. NOTIZIE RECENTI, persone viventi, eventi attuali, informazioni che potrebbero essere cambiate, attualità:
+2a. NOTIZIE RECENTI su ENTITÀ SPECIFICA (persona, azienda, evento, prodotto specifico):
    → coordinate: [SearchTeam → ScraperAgent → SynthAgent]
-   SearchTeam ricerca in parallelo su web, Wikipedia e feed RSS e restituisce descrizione + lista URL,
+   SearchTeam ricerca su web (multi-backend) + Wikipedia e restituisce descrizione + lista URL,
    ScraperAgent apre le pagine rilevanti ed estrae il contenuto completo,
    SynthAgent elabora tutto e produce la risposta finale.
+
+2b. DIGEST DI NOTIZIE su TOPIC/CATEGORIA GENERICA (es. calcio, tech, politica, finanza):
+   → coordinate: [NewsTeam → ScraperAgent → SynthAgent]
+   NewsTeam ricerca su web news + feed RSS personali e restituisce titoli + lista URL recenti,
+   ScraperAgent apre le pagine rilevanti ed estrae il contenuto completo,
+   SynthAgent elabora tutto e produce il digest finale.
 
 3. VIDEO YOUTUBE:
    → route o coordinate con YouTubeAgent (+ SynthAgent se serve sintesi)
@@ -193,13 +200,26 @@ Richiesta: "chi ha ucciso Lincoln?"
 Richiesta: "ultime notizie su OpenAI"
 {{
   "goal": "Raccogliere e sintetizzare le ultime notizie su OpenAI",
-  "intermediate_message": "Cerco le ultime notizie su OpenAI su web, Wikipedia e feed RSS.",
+  "intermediate_message": "Cerco le ultime notizie su OpenAI su web e Wikipedia.",
+  "team_name": "AnClaw Search Team",
+  "team_mode": "coordinate",
+  "agents": [
+    {{"name": "SearchTeam", "role": "Team di ricerca parallela", "instructions": "Cerca le ultime notizie su OpenAI su web e Wikipedia. Restituisci descrizione ampia e lista URL.", "is_pure_llm": false}},
+    {{"name": "ScraperAgent", "role": "Lettore di pagine", "instructions": "Apri i top 3 URL trovati da SearchTeam ed estrai il contenuto testuale completo.", "is_pure_llm": false}},
+    {{"name": "SynthAgent", "role": "Sintetizzatore", "instructions": "Elabora i contenuti estratti e produci un riassunto delle ultime notizie su OpenAI.", "is_pure_llm": false}}
+  ]
+}}
+
+Richiesta: "dammi le ultime notizie di calcio"
+{{
+  "goal": "Raccogliere e sintetizzare le ultime notizie di calcio",
+  "intermediate_message": "Cerco le ultime notizie di calcio su web e feed RSS.",
   "team_name": "AnClaw News Team",
   "team_mode": "coordinate",
   "agents": [
-    {{"name": "SearchTeam", "role": "Team di ricerca parallela", "instructions": "Cerca le ultime notizie su OpenAI su web, Wikipedia e feed RSS. Restituisci descrizione ampia e lista URL.", "is_pure_llm": false}},
-    {{"name": "ScraperAgent", "role": "Lettore di pagine", "instructions": "Apri i top 3 URL trovati da SearchTeam ed estrai il contenuto testuale completo.", "is_pure_llm": false}},
-    {{"name": "SynthAgent", "role": "Sintetizzatore", "instructions": "Elabora i contenuti estratti e produci un riassunto delle ultime notizie su OpenAI.", "is_pure_llm": false}}
+    {{"name": "NewsTeam", "role": "Team notizie per topic", "instructions": "Cerca le ultime notizie di calcio su web news e feed RSS. Restituisci titoli, sommari e lista URL recenti.", "is_pure_llm": false}},
+    {{"name": "ScraperAgent", "role": "Lettore di pagine", "instructions": "Apri i top 3 URL trovati da NewsTeam ed estrai il contenuto testuale completo.", "is_pure_llm": false}},
+    {{"name": "SynthAgent", "role": "Sintetizzatore", "instructions": "Elabora i contenuti estratti e produci un digest delle ultime notizie di calcio.", "is_pure_llm": false}}
   ]
 }}
 """.strip()
@@ -299,26 +319,46 @@ async def select_rss_feeds(query: str) -> list[dict]:
 
 
 async def make_search_team(query: str) -> Team:
+    return Team(
+        name="Search Team",
+        mode="broadcast",
+        model=Gemini(id="gemini-2.5-flash"),
+        members=[
+            _make_search_agent(),
+            _make_wikipedia_agent(),
+        ],
+        instructions=(
+            _base_instructions()
+            + " Sei il coordinatore del Search Team. "
+            "Ricevi i risultati paralleli degli agenti di ricerca (web multi-backend, Wikipedia). "
+            "Produci un unico messaggio strutturato con:\n"
+            "1) Descrizione ampia di quanto trovato dalle varie fonti;\n"
+            "2) Lista completa degli URL rilevanti da approfondire (formato: '## URL' seguito da elenco).\n"
+            "Includi tutti gli URL trovati: verranno filtrati dallo ScraperAgent."
+        ),
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
+async def make_news_team(query: str) -> Team:
     selected_feeds = await select_rss_feeds(query)
 
-    members: list[Agent] = [
-        _make_search_agent(),
-        _make_wikipedia_agent(),
-    ]
+    members: list[Agent] = [_make_news_search_agent()]
     for feed in selected_feeds:
         members.append(_make_rss_agent(feed["url"], feed["name"], feed.get("description", "")))
 
     return Team(
-        name="Search Team",
+        name="News Team",
         mode="broadcast",
         model=Gemini(id="gemini-2.5-flash"),
         members=members,
         instructions=(
             _base_instructions()
-            + " Sei il coordinatore del Search Team. "
-            "Ricevi i risultati paralleli di tutti gli agenti di ricerca (web, Wikipedia, RSS). "
+            + " Sei il coordinatore del News Team. "
+            "Ricevi i risultati paralleli degli agenti notizie (web news, feed RSS). "
             "Produci un unico messaggio strutturato con:\n"
-            "1) Descrizione ampia di quanto trovato dalle varie fonti;\n"
+            "1) Riepilogo delle ultime notizie trovate dalle varie fonti;\n"
             "2) Lista completa degli URL rilevanti da approfondire (formato: '## URL' seguito da elenco).\n"
             "Includi tutti gli URL trovati: verranno filtrati dallo ScraperAgent."
         ),

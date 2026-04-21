@@ -36,6 +36,7 @@ from .agent_router import (
     run_architect,
     get_plan,
     make_search_team,
+    make_news_team,
 )
 
 _DB_PATH = "tmp/agent_data.db"
@@ -230,6 +231,8 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
         for spec in plan.agents:
             if spec.name == "SearchTeam":
                 members.append(await make_search_team(message))
+            elif spec.name == "NewsTeam":
+                members.append(await make_news_team(message))
             elif spec.name == "SynthAgent":
                 members.append(self._make_synth_agent())
             elif not spec.is_pure_llm and spec.name == "SchedulerAgent":

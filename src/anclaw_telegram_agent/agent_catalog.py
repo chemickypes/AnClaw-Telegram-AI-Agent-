@@ -74,18 +74,41 @@ def _make_search_agent() -> Agent:
     return Agent(
         name="SearchAgent",
         role=(
-            "Esegue ricerche web e su Hacker News. "
+            "Esegue ricerche web e su Hacker News su entità specifiche (persone, aziende, eventi). "
             "Restituisce una lista di URL rilevanti con titoli e snippet per ogni risultato trovato."
         ),
         model=Gemini(id="gemini-2.5-flash"),
         instructions=(
             _base_instructions()
             + " Il tuo unico compito è cercare informazioni e restituire URL + snippet rilevanti. "
-            "Usa WebSearchTools per ricerche generali, HackerNews per notizie tech. "
+            "Usa WebSearchTools per ricerche generali (prova più backend automaticamente), "
+            "HackerNews per notizie tech. "
             "NON aprire le pagine: limitati a elencare i risultati con URL, titolo e snippet. "
             "Restituisci sempre gli URL completi trovati, sono necessari per il passo successivo."
         ),
-        tools=[WebSearchTools(enable_news=False), HackerNewsTools()],
+        tools=[WebSearchTools(enable_news=False, backend="auto"), HackerNewsTools()],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
+def _make_news_search_agent() -> Agent:
+    return Agent(
+        name="NewsSearchAgent",
+        role=(
+            "Cerca le ultime notizie su un topic o categoria generica via web e Hacker News. "
+            "Restituisce URL recenti con titoli e snippet."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + " Il tuo unico compito è cercare notizie recenti e restituire URL + snippet. "
+            "Usa WebSearchTools con la modalità news (search_news) per risultati recenti, "
+            "HackerNews per notizie tech. "
+            "NON aprire le pagine: limitati a elencare i risultati con URL, titolo e snippet. "
+            "Restituisci sempre gli URL completi trovati."
+        ),
+        tools=[WebSearchTools(enable_news=True, backend="auto", timelimit="w"), HackerNewsTools()],
         debug_mode=True,
         debug_level=2,
     )
@@ -400,8 +423,12 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
 }
 
 _CATALOG_DESCRIPTIONS = (
-    "- SearchTeam: team di ricerca parallela su web (DuckDuckGo + HackerNews), Wikipedia e feed RSS — "
+    "- SearchTeam: team di ricerca parallela su web (multi-backend) + HackerNews + Wikipedia — "
+    "per ricerche su entità specifiche (persone, aziende, eventi, fatti recenti); "
     "restituisce descrizione ampia + lista URL rilevanti da approfondire\n"
+    "- NewsTeam: team di ricerca notizie su web news + HackerNews + feed RSS personali — "
+    "per richieste di notizie su topic/categorie generiche (es. calcio, tech, politica); "
+    "restituisce titoli, sommari e URL delle ultime notizie\n"
     "- ScraperAgent: apre e legge pagine web dagli URL, estrae contenuto completo (WebBrowser + Crawl4AI)\n"
     "- SynthAgent: sintetizzatore finale con memoria di sessione — risponde a domande, elabora i dati raccolti\n"
     "- YouTubeAgent: analisi video YouTube, trascrizioni, ricerca canali\n"

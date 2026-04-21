@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 _TZ = ZoneInfo("Europe/Rome")
 _SCOPES = ["https://www.googleapis.com/auth/calendar"]
-_TOKEN_PATH = os.path.join(os.path.dirname(__file__), "token.json")
-_CREDS_PATH = os.path.join(os.path.dirname(__file__), "credentials.json")
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_TOKEN_PATH = os.path.join(_PROJECT_ROOT, "token.json")
+_CREDS_PATH = os.path.join(_PROJECT_ROOT, "credentials.json")
 
 
 def _get_service():
