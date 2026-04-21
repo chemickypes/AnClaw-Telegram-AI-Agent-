@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 
 from agno.agent import Agent
@@ -16,9 +17,100 @@ from agent_catalog import (
     _make_wikipedia_agent,
     _make_rss_agent,
 )
-from agent_models import ArchitectPlan, _ARCHITECT_HINT, _FALLBACK_PLAN
+from agent_models import AgentSpec, ArchitectPlan, _ARCHITECT_HINT, _FALLBACK_PLAN
 
 logger = logging.getLogger(__name__)
+
+# ── Routing deterministico ────────────────────────────────────────────────────
+
+_RE_CONTEXT_PREFIX = re.compile(r"^\[Contesto:[^\]]+\]\n\n", re.DOTALL)
+_RE_FILE_PREFIX = re.compile(r"^\[FILE SALVATO:[^\]]+\]\n*", re.DOTALL)
+
+
+def _strip_architect_prefix(message: str) -> str:
+    """Rimuove i prefissi aggiunti da agent.py prima del testo utente reale."""
+    m = _RE_CONTEXT_PREFIX.match(message)
+    text = message[m.end():] if m else message
+    m2 = _RE_FILE_PREFIX.match(text)
+    return text[m2.end():] if m2 else text
+
+
+_RE_SCHEDULER = re.compile(
+    r"^\s*(ricordami|avvisami|notificami|crea|imposta|aggiungi|programma)\b.*"
+    r"\bogni\s+(giorno|settimana|mese|ora|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica)\b"
+    r"|^\s*ogni\s+(giorno|settimana|mese|ora|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica)\b"
+    r"|^\s*(crea|imposta|aggiungi|programma)\s+(una?\s+)?(sveglia|task\s+ricorrente)\b",
+    re.IGNORECASE,
+)
+
+_RE_REMINDER = re.compile(
+    r"^\s*(ricordami|avvisami|notificami)\b"
+    r"|^\s*promemoria\s*[:\-]",
+    re.IGNORECASE,
+)
+_RE_NOTE_SAVE = re.compile(
+    r"^\s*(salva|aggiungi|scrivi|crea)\s+(una?\s+)?(nota|appunto)\b",
+    re.IGNORECASE,
+)
+_RE_NOTE_LIST = re.compile(
+    r"^\s*(mostra|lista|elenca|vedi|leggi|dammi)\s+(le\s+|gli\s+|tutte?\s+le\s+)?(note|appunti)\b",
+    re.IGNORECASE,
+)
+_RE_NOTE_SEARCH = re.compile(
+    r"^\s*(cerca|trova)\s+(nelle?\s+)?(note|appunti)\b",
+    re.IGNORECASE,
+)
+_RE_NOTE_DELETE = re.compile(
+    r"^\s*(elimina|cancella|rimuovi)\s+(la\s+|questa\s+)?nota\b",
+    re.IGNORECASE,
+)
+_RE_RSS = re.compile(
+    r"^\s*(aggiungi|rimuovi|elimina|mostra|lista|elenca)\s+(un\s+)?feed(\s+rss)?\b"
+    r"|^\s*(feed\s+rss|lista\s+(dei\s+)?feed|mostra\s+(i\s+)?feed)\b",
+    re.IGNORECASE,
+)
+
+
+def _route_plan(agent_name: str, goal: str, intermediate: str, instructions: str) -> ArchitectPlan:
+    return ArchitectPlan(
+        goal=goal,
+        intermediate_message=intermediate,
+        team_name="AnClaw Direct Team",
+        team_mode="route",
+        agents=[AgentSpec(name=agent_name, role=agent_name, instructions=instructions, is_pure_llm=False)],
+    )
+
+
+def _deterministic_route(user_text: str) -> ArchitectPlan | None:
+    if _RE_SCHEDULER.match(user_text):
+        return _route_plan(
+            "SchedulerAgent",
+            "Gestire la sveglia o il task ricorrente",
+            "Configuro la sveglia ricorrente...",
+            "Crea o gestisci la sveglia ricorrente richiesta dall'utente.",
+        )
+    if _RE_REMINDER.match(user_text):
+        return _route_plan(
+            "ReminderAgent",
+            "Creare il promemoria richiesto",
+            "Creo il promemoria...",
+            "Crea il promemoria richiesto dall'utente.",
+        )
+    if any(r.match(user_text) for r in (_RE_NOTE_SAVE, _RE_NOTE_LIST, _RE_NOTE_SEARCH, _RE_NOTE_DELETE)):
+        return _route_plan(
+            "NotesAgent",
+            "Gestire gli appunti personali",
+            "Gestisco le note...",
+            "Esegui l'operazione richiesta sugli appunti.",
+        )
+    if _RE_RSS.match(user_text):
+        return _route_plan(
+            "RSSFeedsAgent",
+            "Gestire i feed RSS",
+            "Gestisco i feed RSS...",
+            "Esegui l'operazione richiesta sui feed RSS.",
+        )
+    return None
 
 _ARCHITECT_INSTRUCTIONS = f"""
 Sei l'agente Architetto di AnClaw, l'assistente AI personale di Angelo Moroni.
@@ -122,6 +214,13 @@ async def run_architect(
     files: list | None = None,
 ) -> ArchitectPlan:
     """Chiama l'Architetto con retry (max 2 tentativi) e fallback automatico."""
+    user_text = _strip_architect_prefix(message)
+    fast_plan = _deterministic_route(user_text)
+    if fast_plan:
+        logger.info("[ROUTER] deterministico → %s | testo: %r", fast_plan.agents[0].name, user_text[:80])
+        return fast_plan
+
+    logger.info("[ROUTER] LLM architect → testo: %r", user_text[:80])
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
