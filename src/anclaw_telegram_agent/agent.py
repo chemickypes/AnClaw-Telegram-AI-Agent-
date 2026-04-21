@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from collections.abc import Callable, Coroutine
@@ -43,6 +44,21 @@ _DB_PATH = "tmp/agent_data.db"
 os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
 
 logger = logging.getLogger(__name__)
+
+_DRIVE_DOWNLOAD_RE = re.compile(
+    r"\[DRIVE_DOWNLOAD:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\]"
+)
+
+
+def _extract_drive_downloads(text: str) -> list[File]:
+    files: list[File] = []
+    for match in _DRIVE_DOWNLOAD_RE.finditer(text):
+        path, filename, mime = match.group(1), match.group(2), match.group(3)
+        if os.path.isfile(path):
+            files.append(File(filepath=path, filename=filename, mime_type=mime))
+        else:
+            logger.warning(f"Drive download: file non trovato su disco: {path}")
+    return files
 
 # ── Estrazione fatti espliciti ────────────────────────────────────────────────
 
@@ -317,7 +333,9 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
             elif event.event == TeamRunEvent.run_error:
                 logger.error(f"Team run error: {getattr(event, 'error', 'unknown')}")
 
-        return "".join(content_parts), generated_files
+        full_response = "".join(content_parts)
+        generated_files.extend(_extract_drive_downloads(full_response))
+        return full_response, generated_files
 
     async def run(
         self,

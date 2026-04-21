@@ -51,6 +51,11 @@ _TOOL_LABELS: dict[str, str] = {
     "list_events": "lettura calendario",
     "create_event": "creazione evento calendario",
     "delete_event": "eliminazione evento calendario",
+    "search_files": "ricerca su Drive",
+    "read_file_content": "lettura file Drive",
+    "download_file": "download da Drive",
+    "create_text_file": "creazione file su Drive",
+    "upload_file": "upload su Drive",
     "save_note": "salvataggio nota",
     "list_notes": "lettura note",
     "search_notes": "ricerca nelle note",
@@ -400,6 +405,37 @@ Conferma sempre all'utente l'azione eseguita con data e ora formattate in italia
     )
 
 
+def _make_drive_agent() -> Agent:
+    from .drive_tools import search_files, read_file_content, download_file, create_text_file, upload_file
+    return Agent(
+        name="DriveAgent",
+        role=(
+            "Gestione Google Drive: cerca file, legge contenuti, scarica file come allegato Telegram, "
+            "crea file di testo e carica file su Drive."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + """
+Sei l'agente Google Drive di AnClaw.
+
+Usa search_files per cercare file per nome o parola chiave.
+Usa read_file_content per leggere il testo di un file (Docs, Fogli, testo, PDF).
+Usa download_file per scaricare un file — verrà inviato come allegato su Telegram.
+Usa create_text_file per creare un nuovo file di testo su Drive.
+Usa upload_file per caricare un file locale su Drive — il path è nel messaggio come [FILE SALVATO: path].
+
+Quando cerchi file, mostra sempre ID, nome e link.
+Quando scarichi un file, conferma il nome e lascia che il sistema lo invii automaticamente.
+Quando carichi o crei un file, fornisci il link Drive al termine.
+"""
+        ),
+        tools=[search_files, read_file_content, download_file, create_text_file, upload_file],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 def _make_pure_llm_agent(spec: AgentSpec) -> Agent:
     return Agent(
         name=spec.name,
@@ -420,6 +456,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "CodeAgent": _make_code_agent,
     "NotesAgent": _make_notes_agent,
     "RSSFeedsAgent": _make_rss_feeds_agent,
+    "DriveAgent": _make_drive_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -439,5 +476,7 @@ _CATALOG_DESCRIPTIONS = (
     "- CodeAgent: esegue operazioni matematiche/statistiche e analisi su file CSV/Excel "
     "(usa RestrictedPython — sicuro, nessun accesso a filesystem o internet)\n"
     "- NotesAgent: gestione appunti personali — salva note, mostra tutte le note, cerca nelle note, elimina note per ID\n"
-    "- RSSFeedsAgent: gestione feed RSS — aggiunge nuovi feed, mostra la lista, elimina feed per ID"
+    "- RSSFeedsAgent: gestione feed RSS — aggiunge nuovi feed, mostra la lista, elimina feed per ID\n"
+    "- DriveAgent: gestione Google Drive — cerca file, legge contenuti, scarica file (allegato Telegram), "
+    "crea file di testo, carica file da Telegram su Drive"
 )

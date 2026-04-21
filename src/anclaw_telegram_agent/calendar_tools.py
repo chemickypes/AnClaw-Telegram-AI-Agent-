@@ -14,7 +14,10 @@ from googleapiclient.discovery import build
 logger = logging.getLogger(__name__)
 
 _TZ = ZoneInfo("Europe/Rome")
-_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/drive",
+]
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _TOKEN_PATH = os.path.join(_PROJECT_ROOT, "token.json")
 _CREDS_PATH = os.path.join(_PROJECT_ROOT, "credentials.json")

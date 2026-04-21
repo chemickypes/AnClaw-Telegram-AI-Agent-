@@ -16,6 +16,7 @@ from anclaw_telegram_agent.agent_catalog import (
     _make_youtube_agent,
     _make_file_agent,
     _make_reminder_agent,
+    _make_drive_agent,
 )
 from anclaw_telegram_agent.agent_router import _deterministic_route
 
@@ -157,3 +158,13 @@ def test_catalog_agents_have_tools():
     for name, factory in _AGENT_CATALOG.items():
         agent = factory()
         assert agent.tools, f"{name} non ha tool"
+
+
+def test_drive_agent_tools():
+    agent = _make_drive_agent()
+    names = tool_names(agent)
+    assert "search_files" in names
+    assert "read_file_content" in names
+    assert "download_file" in names
+    assert "create_text_file" in names
+    assert "upload_file" in names

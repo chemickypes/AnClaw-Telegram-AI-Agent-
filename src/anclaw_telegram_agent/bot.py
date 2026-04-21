@@ -516,6 +516,14 @@ class TelegramBot:
         logger.info(f"Foto ricevuta da {update.effective_user.id} — caption: {caption!r}")
 
         photo_bytes = await self._download_file(photo, context)
+
+        uploads_dir = os.path.join(os.path.dirname(__file__), "tmp", "uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        saved_path = os.path.join(uploads_dir, f"{photo.file_unique_id}.jpg")
+        with open(saved_path, "wb") as fh:
+            fh.write(photo_bytes)
+        caption = f"[FILE SALVATO: {saved_path}]\n{caption}"
+
         images = [Image(content=photo_bytes, format="jpeg")]
         await self._process_and_reply(update, context, caption, images=images)
 
@@ -536,18 +544,15 @@ class TelegramBot:
             # Documento testuale / foglio di calcolo
             doc_bytes = await self._download_file(doc, context)
 
-            # Salva CSV/Excel su disco così il CodeAgent può accedervi tramite file_path
-            if mime_type in ("text/csv",
-                             "application/vnd.ms-excel",
-                             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
-                uploads_dir = os.path.join(os.path.dirname(__file__), "tmp", "uploads")
-                os.makedirs(uploads_dir, exist_ok=True)
-                safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in (doc.file_name or "file"))
-                saved_path = os.path.join(uploads_dir, f"{doc.file_unique_id}_{safe_name}")
-                with open(saved_path, "wb") as fh:
-                    fh.write(doc_bytes)
-                caption = f"[FILE SALVATO: {saved_path}]\n{caption}"
-                logger.info(f"File CSV/Excel salvato in: {saved_path}")
+            # Salva su disco: CodeAgent e DriveAgent accedono al file tramite path
+            uploads_dir = os.path.join(os.path.dirname(__file__), "tmp", "uploads")
+            os.makedirs(uploads_dir, exist_ok=True)
+            safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in (doc.file_name or "file"))
+            saved_path = os.path.join(uploads_dir, f"{doc.file_unique_id}_{safe_name}")
+            with open(saved_path, "wb") as fh:
+                fh.write(doc_bytes)
+            caption = f"[FILE SALVATO: {saved_path}]\n{caption}"
+            logger.info(f"File salvato in: {saved_path}")
 
             files = [File(content=doc_bytes, content_type=mime_type)]
             await self._process_and_reply(update, context, caption, files=files)
