@@ -1,5 +1,5 @@
 import pytest
-from agent_router import _deterministic_route, _strip_architect_prefix
+from anclaw_telegram_agent.agent_router import _deterministic_route, _strip_architect_prefix
 
 
 def route(msg: str) -> str | None:

@@ -12,10 +12,10 @@ from agno.tools.websearch import WebSearchTools
 from agno.tools.wikipedia import WikipediaTools
 from agno.tools.youtube import YouTubeTools
 
-import memory_store
-import notes_store
-import rss_store
-from agent_models import AgentSpec
+from . import memory_store
+from . import notes_store
+from . import rss_store
+from .agent_models import AgentSpec
 
 _TZ = zoneinfo.ZoneInfo("Europe/Rome")
 _CUTOFF = "agosto 2025"
@@ -109,7 +109,7 @@ def _make_wikipedia_agent() -> Agent:
 
 
 def _make_rss_agent(feed_url: str, feed_name: str, feed_description: str) -> Agent:
-    from rss_tools import make_rss_fetch_tool
+    from .rss_tools import make_rss_fetch_tool
     tool = make_rss_fetch_tool(feed_url, feed_name)
     return Agent(
         name=f"RSSAgent_{feed_name}",
@@ -182,7 +182,7 @@ def _make_file_agent() -> Agent:
 
 
 def _make_code_agent() -> Agent:
-    from code_tools import execute_math, search_in_file, filter_file_rows
+    from .code_tools import execute_math, search_in_file, filter_file_rows
     return Agent(
         name="CodeAgent",
         role=(
@@ -209,7 +209,7 @@ def _make_code_agent() -> Agent:
 
 
 def _make_calendar_agent() -> Agent:
-    from calendar_tools import list_events, create_event, delete_event
+    from .calendar_tools import list_events, create_event, delete_event
     return Agent(
         name="CalendarAgent",
         role="Gestione del calendario Google: legge eventi futuri, crea nuovi eventi, elimina eventi.",
@@ -343,7 +343,7 @@ def _make_rss_feeds_agent() -> Agent:
 
 
 def _make_reminder_agent(scheduler, get_chat_id) -> Agent:
-    from scheduler import make_reminder_tools
+    from .scheduler import make_reminder_tools
     tools = make_reminder_tools(scheduler=scheduler, get_chat_id=get_chat_id)
     return Agent(
         name="ReminderAgent",

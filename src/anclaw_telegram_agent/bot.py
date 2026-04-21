@@ -16,10 +16,10 @@ from telegram.ext import (
 
 from agno.media import File, Image
 
-from agent import AIAgent
-from config import BotMode, Config
-from sender import TelegramSender
-from transcriber import AudioTranscriber
+from .agent import AIAgent
+from .config import BotMode, Config
+from .sender import TelegramSender
+from .transcriber import AudioTranscriber
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +111,8 @@ class TelegramBot:
         scheduler = agent.scheduler
 
         async def _post_init(app: Application) -> None:
-            from scheduler import init_schedules_table, load_jobs_from_db, set_executor_context
-            from reminders_store import init_reminders_table
+            from .scheduler import init_schedules_table, load_jobs_from_db, set_executor_context
+            from .reminders_store import init_reminders_table
             init_schedules_table()
             init_reminders_table()
             scheduler.start()
@@ -260,7 +260,7 @@ class TelegramBot:
 
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         import sqlite3
-        from scheduler import _all_schedules
+        from .scheduler import _all_schedules
 
         mode = self.config.mode.value.upper()
 
@@ -296,7 +296,7 @@ class TelegramBot:
 
     async def _handle_sveglie(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from datetime import datetime as _dt
-        from scheduler import _all_schedules
+        from .scheduler import _all_schedules
 
         rows = _all_schedules()
         if not rows:
@@ -323,7 +323,7 @@ class TelegramBot:
 
     async def _handle_promemoria(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from datetime import datetime as _dt
-        from reminders_store import get_all_reminders
+        from .reminders_store import get_all_reminders
         from zoneinfo import ZoneInfo as _ZI
 
         _TZ = _ZI("Europe/Rome")
@@ -358,8 +358,8 @@ class TelegramBot:
         await query.answer()
 
         _, reminder_id = query.data.split(":", 1)
-        from reminders_store import delete_reminder
-        from scheduler import _remove_reminder_job
+        from .reminders_store import delete_reminder
+        from .scheduler import _remove_reminder_job
         deleted = delete_reminder(reminder_id)
         _remove_reminder_job(self.agent.scheduler, reminder_id)
 
@@ -371,7 +371,7 @@ class TelegramBot:
 
     async def _handle_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from datetime import datetime as _dt
-        from notes_store import get_all_notes
+        from .notes_store import get_all_notes
 
         notes = get_all_notes()
         if not notes:
@@ -411,7 +411,7 @@ class TelegramBot:
         await query.answer()
 
         _, note_id_str = query.data.split(":", 1)
-        from notes_store import delete_note
+        from .notes_store import delete_note
         deleted = delete_note(int(note_id_str))
 
         await query.edit_message_reply_markup(reply_markup=None)
@@ -422,7 +422,7 @@ class TelegramBot:
 
     async def _handle_ricordi(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from datetime import datetime as _dt
-        from memory_store import get_all_facts
+        from .memory_store import get_all_facts
 
         facts = get_all_facts()
         if not facts:
@@ -460,7 +460,7 @@ class TelegramBot:
         await query.answer()
 
         _, fact_id_str = query.data.split(":", 1)
-        from memory_store import delete_fact
+        from .memory_store import delete_fact
         deleted = delete_fact(int(fact_id_str))
 
         await query.edit_message_reply_markup(reply_markup=None)
@@ -474,7 +474,7 @@ class TelegramBot:
         logger.info(f"Testo ricevuto da {update.effective_user.id}: {text!r}")
 
         # Aggiungi hint di scheduling se rilevato, per aiutare l'Architetto a instradare
-        from agent import _extract_explicit_fact, _extract_quick_note
+        from .agent import _extract_explicit_fact, _extract_quick_note
         if _extract_explicit_fact(text):
             # Fatto esplicito: risposta diretta senza passare per il team
             await update.message.reply_text("Fatto memorizzato.", parse_mode="Markdown")
@@ -483,7 +483,7 @@ class TelegramBot:
         quick_note = _extract_quick_note(text)
         if quick_note is not None:
             # Nota rapida: salva direttamente senza passare per il team
-            from notes_store import save_note
+            from .notes_store import save_note
             note_id = save_note(quick_note)
             await update.message.reply_text(
                 f"Nota salvata (ID: {note_id}).", parse_mode="Markdown"
@@ -567,7 +567,7 @@ class TelegramBot:
         data = query.data  # "sched_del:abc123" o "sched_ref:abc123"
         action, schedule_id = data.split(":", 1)
 
-        from scheduler import delete_schedule_and_job, refresh_schedule_plan
+        from .scheduler import delete_schedule_and_job, refresh_schedule_plan
 
         if action == "sched_del":
             msg = delete_schedule_and_job(schedule_id, self.agent.scheduler)

@@ -7,8 +7,8 @@ from agno.agent import Agent
 from agno.models.google import Gemini
 from agno.team import Team
 
-import rss_store
-from agent_catalog import (
+from . import rss_store
+from .agent_catalog import (
     _CATALOG_DESCRIPTIONS,
     _TZ,
     _CUTOFF,
@@ -17,7 +17,7 @@ from agent_catalog import (
     _make_wikipedia_agent,
     _make_rss_agent,
 )
-from agent_models import AgentSpec, ArchitectPlan, _ARCHITECT_HINT, _FALLBACK_PLAN
+from .agent_models import AgentSpec, ArchitectPlan, _ARCHITECT_HINT, _FALLBACK_PLAN
 
 logger = logging.getLogger(__name__)
 

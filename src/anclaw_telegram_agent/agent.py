@@ -15,14 +15,14 @@ from agno.models.google import Gemini
 from agno.team import Team
 from agno.run.team import TeamRunEvent
 
-from rss_feeds import RSS_FEEDS
+from .rss_feeds import RSS_FEEDS
 
-import memory_store
-import notes_store
-import rss_store
+from . import memory_store
+from . import notes_store
+from . import rss_store
 
-from agent_models import AgentSpec, ArchitectPlan, _FALLBACK_PLAN  # noqa: F401 (re-export)
-from agent_catalog import (
+from .agent_models import AgentSpec, ArchitectPlan, _FALLBACK_PLAN  # noqa: F401 (re-export)
+from .agent_catalog import (
     _TZ,
     _CUTOFF,
     _TOOL_LABELS,
@@ -31,14 +31,14 @@ from agent_catalog import (
     _make_pure_llm_agent,
     _make_reminder_agent,
 )
-from agent_router import (
+from .agent_router import (
     _ARCHITECT_INSTRUCTIONS,
     run_architect,
     get_plan,
     make_search_team,
 )
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "tmp", "agent_data.db")
+_DB_PATH = "tmp/agent_data.db"
 os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
 
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ class AIAgent:
         rss_store.init_rss_table()
         rss_store.seed_feeds(RSS_FEEDS)
 
-        from scheduler import create_scheduler
+        from .scheduler import create_scheduler
         self._scheduler = create_scheduler()
 
     @property
@@ -154,7 +154,7 @@ class AIAgent:
         )
 
     def _make_scheduler_agent(self) -> Agent:
-        from scheduler import make_scheduler_tools
+        from .scheduler import make_scheduler_tools
         tools = make_scheduler_tools(
             scheduler=self._scheduler,
             ai_agent=self,

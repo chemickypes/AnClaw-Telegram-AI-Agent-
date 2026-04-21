@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-_DB_PATH = os.path.join(os.path.dirname(__file__), "tmp", "agent_data.db")
+_DB_PATH = "tmp/agent_data.db"
 
 
 def init_rss_table() -> None:

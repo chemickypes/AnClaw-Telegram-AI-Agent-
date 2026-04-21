@@ -5,7 +5,7 @@ comando → piano deterministico → factory → agente sia coerente.
 import pytest
 from unittest.mock import MagicMock
 
-from agent_catalog import (
+from anclaw_telegram_agent.agent_catalog import (
     _AGENT_CATALOG,
     _make_notes_agent,
     _make_rss_feeds_agent,
@@ -17,7 +17,7 @@ from agent_catalog import (
     _make_file_agent,
     _make_reminder_agent,
 )
-from agent_router import _deterministic_route
+from anclaw_telegram_agent.agent_router import _deterministic_route
 
 
 def tool_names(agent) -> list[str]:

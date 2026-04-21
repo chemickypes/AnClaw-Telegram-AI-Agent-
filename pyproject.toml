@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anclaw-telegram-agent"
+version = "0.1.0"
+description = "Telegram bot con agno e architettura dinamica Architetto + team"
+requires-python = ">=3.12"
+dependencies = [
+    "python-telegram-bot==21.*",
+    "python-dotenv>=1.0.0",
+    "agno>=1.0.0",
+    "google-genai>=1.0.0",
+    "duckduckgo-search>=6.0.0",
+    "crawl4ai>=0.4.0",
+    "youtube-transcript-api>=0.6.0",
+    "praw>=7.7.0",
+    "apscheduler>=3.10.0",
+    "sqlalchemy>=2.0.0",
+    "RestrictedPython>=7.0",
+    "openpyxl>=3.1.0",
+    "feedparser>=6.0.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-api-python-client>=2.0.0",
+]
+
+[project.scripts]
+anclaw-bot = "anclaw_telegram_agent.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anclaw_telegram_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["anclaw_telegram_agent"]

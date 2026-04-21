@@ -22,7 +22,7 @@ from io import BytesIO
 from telegram import Bot
 from telegram.constants import ParseMode
 
-from config import Config
+from .config import Config
 
 # MIME types che vengono inviati come foto (rendering inline in chat)
 _PHOTO_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}

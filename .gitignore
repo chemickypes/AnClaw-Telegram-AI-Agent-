@@ -3,7 +3,12 @@
 tmp/
 __pycache__/
 *.pyc
+*.pyo
 *.db
 .DS_Store
 credentials.json
 token.json
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

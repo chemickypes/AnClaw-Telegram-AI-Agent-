@@ -11,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
 if TYPE_CHECKING:
-    from agent import AIAgent, ArchitectPlan
+    from .agent import AIAgent, ArchitectPlan
 
 _TZ = ZoneInfo("Europe/Rome")
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ async def execute_schedule(schedule_id: str) -> None:
     _, user_message, _, plan_json, chat_id = row
 
     try:
-        from agent import ArchitectPlan
+        from .agent import ArchitectPlan
         plan: ArchitectPlan = ArchitectPlan.model_validate_json(plan_json)
         result, _ = await _ai_agent.run_from_plan(plan, user_message)
         await _bot_app.bot.send_message(chat_id=chat_id, text=result, parse_mode="Markdown")
@@ -271,7 +271,7 @@ def make_scheduler_tools(scheduler: AsyncIOScheduler, ai_agent: "AIAgent", get_c
 # ── Reminder (one-shot) ────────────────────────────────────────────────────────
 
 def _load_reminders_from_db(scheduler: AsyncIOScheduler) -> None:
-    from reminders_store import get_all_reminders
+    from .reminders_store import get_all_reminders
     for row in get_all_reminders():
         reminder_id, _, fire_at_iso, _, _, _ = row
         job_id = f"rem_{reminder_id}"
@@ -310,7 +310,7 @@ async def execute_reminder(reminder_id: str) -> None:
         logger.error("Bot app not set, skipping reminder %s", reminder_id)
         return
 
-    from reminders_store import get_reminder, delete_reminder
+    from .reminders_store import get_reminder, delete_reminder
     row = get_reminder(reminder_id)
     if not row:
         logger.warning("Reminder %s not found in DB, skipping", reminder_id)
@@ -342,13 +342,13 @@ async def execute_reminder(reminder_id: str) -> None:
 
 async def _sync_calendar_reminders() -> None:
     """Rimuove reminder collegati a eventi calendario che non esistono più."""
-    from reminders_store import get_calendar_reminders, delete_reminder
+    from .reminders_store import get_calendar_reminders, delete_reminder
     rows = get_calendar_reminders()
     if not rows:
         return
 
     try:
-        from calendar_tools import _get_service
+        from .calendar_tools import _get_service
         service = _get_service()
     except Exception:
         logger.debug("Calendar sync: impossibile connettersi a Google Calendar")
@@ -390,7 +390,7 @@ def make_reminder_tools(scheduler: AsyncIOScheduler, get_chat_id):
             message: Testo del promemoria da inviare.
             fire_at_iso: Data e ora in formato ISO 8601 (es. "2026-04-20T09:00:00"). Usa il fuso orario Europe/Rome.
         """
-        from reminders_store import save_reminder
+        from .reminders_store import save_reminder
         try:
             fire_at = datetime.fromisoformat(fire_at_iso).replace(tzinfo=_TZ) \
                 if datetime.fromisoformat(fire_at_iso).tzinfo is None \
@@ -433,8 +433,8 @@ def make_reminder_tools(scheduler: AsyncIOScheduler, get_chat_id):
             message: Testo del promemoria. Se vuoto, usa il titolo dell'evento.
             minutes_before: Minuti prima dell'evento a cui inviare il promemoria (default 10).
         """
-        from calendar_tools import get_event_by_title_or_id
-        from reminders_store import save_reminder
+        from .calendar_tools import get_event_by_title_or_id
+        from .reminders_store import save_reminder
         from datetime import timedelta
 
         event = get_event_by_title_or_id(event_title_or_id)
@@ -491,7 +491,7 @@ def make_reminder_tools(scheduler: AsyncIOScheduler, get_chat_id):
 
     async def list_reminders() -> str:
         """Mostra i promemoria one-shot attivi con pulsanti per eliminarli."""
-        from reminders_store import get_all_reminders
+        from .reminders_store import get_all_reminders
 
         rows = get_all_reminders()
         if not rows:
@@ -528,7 +528,7 @@ def make_reminder_tools(scheduler: AsyncIOScheduler, get_chat_id):
         Args:
             reminder_id: ID del promemoria (8 caratteri esadecimali).
         """
-        from reminders_store import delete_reminder as _del
+        from .reminders_store import delete_reminder as _del
         deleted = _del(reminder_id)
         _remove_reminder_job(scheduler, reminder_id)
         if deleted:
