@@ -1,21 +1,115 @@
+import asyncio
+import json
 import zoneinfo
 from collections.abc import Callable
 from datetime import datetime
+from typing import Optional
 
 from agno.agent import Agent
 from agno.models.google import Gemini
+from agno.tools import Toolkit
 from agno.tools.crawl4ai import Crawl4aiTools
 from agno.tools.file_generation import FileGenerationTools
 from agno.tools.hackernews import HackerNewsTools
 from agno.tools.webbrowser import WebBrowserTools
-from agno.tools.websearch import WebSearchTools
 from agno.tools.wikipedia import WikipediaTools
 from agno.tools.youtube import YouTubeTools
+from agno.utils.log import log_debug
 
 from . import memory_store
 from . import notes_store
 from . import rss_store
 from .agent_models import AgentSpec
+
+_SEARCH_TIMEOUT = 15  # seconds per individual DDGS search call
+
+
+class AsyncWebSearchTools(Toolkit):
+    """WebSearchTools con entrypoint async: agno lo awaita senza bloccare l'event loop."""
+
+    def __init__(
+        self,
+        enable_news: bool = True,
+        backend: str = "duckduckgo",
+        timeout: int = 10,
+        fixed_max_results: Optional[int] = None,
+        timelimit: Optional[str] = None,
+        region: Optional[str] = None,
+    ):
+        self._backend = backend
+        self._http_timeout = timeout
+        self._fixed_max_results = fixed_max_results
+        self._timelimit = timelimit
+        self._region = region
+        tools = [self.web_search]
+        if enable_news:
+            tools.append(self.search_news)
+        super().__init__(name="websearch", tools=tools)
+
+    def _ddgs_text(self, query: str, max_results: int) -> str:
+        from ddgs import DDGS
+        kwargs: dict = {"query": query, "max_results": max_results, "backend": self._backend}
+        if self._timelimit:
+            kwargs["timelimit"] = self._timelimit
+        if self._region:
+            kwargs["region"] = self._region
+        with DDGS(timeout=self._http_timeout) as ddgs:
+            return json.dumps(ddgs.text(**kwargs), indent=2)
+
+    def _ddgs_news(self, query: str, max_results: int) -> str:
+        from ddgs import DDGS
+        kwargs: dict = {"query": query, "max_results": max_results}
+        if self._timelimit:
+            kwargs["timelimit"] = self._timelimit
+        if self._region:
+            kwargs["region"] = self._region
+        with DDGS(timeout=self._http_timeout) as ddgs:
+            return json.dumps(ddgs.news(**kwargs), indent=2)
+
+    async def web_search(self, query: str, max_results: int = 5) -> str:
+        """Use this function to search the web for a query.
+
+        Args:
+            query(str): The query to search for.
+            max_results (optional, default=5): The maximum number of results to return.
+
+        Returns:
+            The search results from the web.
+        """
+        n = self._fixed_max_results or max_results
+        log_debug(f"Searching web for: {query} using backend: {self._backend}")
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._ddgs_text, query, n),
+                timeout=_SEARCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return json.dumps({"error": f"Search timed out after {_SEARCH_TIMEOUT}s"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    async def search_news(self, query: str, max_results: int = 5) -> str:
+        """Use this function to get the latest news from the web.
+
+        Args:
+            query(str): The query to search for.
+            max_results (optional, default=5): The maximum number of results to return.
+
+        Returns:
+            The latest news from the web.
+        """
+        n = self._fixed_max_results or max_results
+        log_debug(f"Searching web news for: {query} using backend: {self._backend}")
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._ddgs_news, query, n),
+                timeout=_SEARCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            return json.dumps({"error": f"News search timed out after {_SEARCH_TIMEOUT}s"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
 
 _TZ = zoneinfo.ZoneInfo("Europe/Rome")
 _CUTOFF = "agosto 2025"
@@ -60,6 +154,8 @@ _TOOL_LABELS: dict[str, str] = {
     "list_notes": "lettura note",
     "search_notes": "ricerca nelle note",
     "delete_note": "eliminazione nota",
+    "delegate_task_to_member": "delega al team",
+    "transfer_task_to_member": "delega al team",
 }
 
 
@@ -86,12 +182,12 @@ def _make_search_agent() -> Agent:
         instructions=(
             _base_instructions()
             + " Il tuo unico compito è cercare informazioni e restituire URL + snippet rilevanti. "
-            "Usa WebSearchTools per ricerche generali (prova più backend automaticamente), "
+            "Usa web_search per ricerche generali, "
             "HackerNews per notizie tech. "
             "NON aprire le pagine: limitati a elencare i risultati con URL, titolo e snippet. "
             "Restituisci sempre gli URL completi trovati, sono necessari per il passo successivo."
         ),
-        tools=[WebSearchTools(enable_news=False, backend="auto"), HackerNewsTools()],
+        tools=[AsyncWebSearchTools(enable_news=False), HackerNewsTools()],
         debug_mode=True,
         debug_level=2,
     )
@@ -108,12 +204,12 @@ def _make_news_search_agent() -> Agent:
         instructions=(
             _base_instructions()
             + " Il tuo unico compito è cercare notizie recenti e restituire URL + snippet. "
-            "Usa WebSearchTools con la modalità news (search_news) per risultati recenti, "
+            "Usa search_news per risultati recenti, "
             "HackerNews per notizie tech. "
             "NON aprire le pagine: limitati a elencare i risultati con URL, titolo e snippet. "
             "Restituisci sempre gli URL completi trovati."
         ),
-        tools=[WebSearchTools(enable_news=True, backend="auto", timelimit="w"), HackerNewsTools()],
+        tools=[AsyncWebSearchTools(enable_news=True, timelimit="w"), HackerNewsTools()],
         debug_mode=True,
         debug_level=2,
     )

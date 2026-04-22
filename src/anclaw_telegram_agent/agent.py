@@ -302,36 +302,47 @@ Per AGGIORNARE il piano chiama refresh_schedule(schedule_id).
         content_parts: list[str] = []
         generated_files: list[File] = []
 
-        stream = team.arun(
-            message,
-            user_id=str(user_id),
-            session_id=request_session_id,
-            images=images or None,
-            files=files or None,
-            stream=True,
-            stream_events=True,
-        )
+        _TEAM_TIMEOUT = 120  # seconds
 
-        async for event in stream:
-            if event.event == TeamRunEvent.run_content:
-                content_parts.append(event.content or "")
+        async def _consume_stream() -> None:
+            stream = team.arun(
+                message,
+                user_id=str(user_id),
+                session_id=request_session_id,
+                images=images or None,
+                files=files or None,
+                stream=True,
+                stream_events=True,
+            )
+            async for event in stream:
+                if event.event == TeamRunEvent.run_content:
+                    content_parts.append(event.content or "")
 
-            elif event.event == TeamRunEvent.tool_call_started and on_event:
-                tool_name = (
-                    event.tool.tool_name
-                    if event.tool and event.tool.tool_name
-                    else "tool"
+                elif event.event == TeamRunEvent.tool_call_started and on_event:
+                    tool_name = (
+                        event.tool.tool_name
+                        if event.tool and event.tool.tool_name
+                        else "tool"
+                    )
+                    label = _TOOL_LABELS.get(tool_name, tool_name)
+                    await on_event(f"_{label}..._")
+
+                elif event.event == TeamRunEvent.run_completed:
+                    for member_resp in getattr(event, "member_responses", []):
+                        member_files = getattr(member_resp, "files", None) or []
+                        generated_files.extend(member_files)
+
+                elif event.event == TeamRunEvent.run_error:
+                    logger.error(f"Team run error: {getattr(event, 'error', 'unknown')}")
+
+        try:
+            await asyncio.wait_for(_consume_stream(), timeout=_TEAM_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error(f"Team run timeout after {_TEAM_TIMEOUT}s")
+            if not content_parts:
+                content_parts.append(
+                    "L'elaborazione ha impiegato troppo tempo. Riprova con una richiesta più semplice."
                 )
-                label = _TOOL_LABELS.get(tool_name, tool_name)
-                await on_event(f"_Uso {label}..._")
-
-            elif event.event == TeamRunEvent.run_completed:
-                for member_resp in getattr(event, "member_responses", []):
-                    member_files = getattr(member_resp, "files", None) or []
-                    generated_files.extend(member_files)
-
-            elif event.event == TeamRunEvent.run_error:
-                logger.error(f"Team run error: {getattr(event, 'error', 'unknown')}")
 
         full_response = "".join(content_parts)
         generated_files.extend(_extract_drive_downloads(full_response))
