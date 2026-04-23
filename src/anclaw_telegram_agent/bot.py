@@ -18,6 +18,7 @@ from agno.media import File, Image
 
 from .agent import AIAgent
 from .config import BotMode, Config
+from .markdown_utils import md_to_telegram
 from .sender import TelegramSender
 from .transcriber import AudioTranscriber
 
@@ -207,7 +208,9 @@ class TelegramBot:
         - 4097–8192 chars: split into chunks.
         - Over 8192 chars: send as a .md file to keep the chat readable.
         """
-        if len(text) > _FILE_THRESHOLD:
+        converted = md_to_telegram(text)
+
+        if len(converted) > _FILE_THRESHOLD:
             buf = io.BytesIO(text.encode())
             buf.name = "response.md"
             await message.reply_document(
@@ -218,7 +221,7 @@ class TelegramBot:
             )
             return
 
-        for chunk in _chunk_text(text):
+        for chunk in _chunk_text(converted):
             try:
                 await message.reply_text(chunk, parse_mode="Markdown")
             except BadRequest:
