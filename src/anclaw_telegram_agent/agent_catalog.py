@@ -145,6 +145,7 @@ _TOOL_LABELS: dict[str, str] = {
     "list_events": "lettura calendario",
     "create_event": "creazione evento calendario",
     "delete_event": "eliminazione evento calendario",
+    "get_weather_forecast": "previsioni meteo",
     "search_files": "ricerca su Drive",
     "read_file_content": "lettura file Drive",
     "download_file": "download da Drive",
@@ -501,6 +502,28 @@ Conferma sempre all'utente l'azione eseguita con data e ora formattate in italia
     )
 
 
+def _make_weather_agent() -> Agent:
+    from .location_tools import get_weather_forecast
+    return Agent(
+        name="WeatherAgent",
+        role="Fornisce previsioni meteo per qualsiasi città, oggi o nei prossimi giorni.",
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + " Sei l'agente meteo di AnClaw. "
+            "Usa get_weather_forecast per ottenere le previsioni di una città. "
+            "Scegli il numero di giorni in base alla richiesta: "
+            "'oggi' → days=1, 'domani' → days=2, 'dopodomani' → days=3, "
+            "'questa settimana' o 'prossimi giorni' → days=7. "
+            "Presenta le previsioni in modo chiaro e amichevole, evidenziando i giorni richiesti. "
+            "Se la domanda riguarda un giorno specifico, mostra solo quello."
+        ),
+        tools=[get_weather_forecast],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 def _make_drive_agent() -> Agent:
     from .drive_tools import search_files, read_file_content, download_file, create_text_file, upload_file
     return Agent(
@@ -553,6 +576,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "NotesAgent": _make_notes_agent,
     "RSSFeedsAgent": _make_rss_feeds_agent,
     "DriveAgent": _make_drive_agent,
+    "WeatherAgent": _make_weather_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -574,5 +598,7 @@ _CATALOG_DESCRIPTIONS = (
     "- NotesAgent: gestione appunti personali — salva note, mostra tutte le note, cerca nelle note, elimina note per ID\n"
     "- RSSFeedsAgent: gestione feed RSS — aggiunge nuovi feed, mostra la lista, elimina feed per ID\n"
     "- DriveAgent: gestione Google Drive — cerca file, legge contenuti, scarica file (allegato Telegram), "
-    "crea file di testo, carica file da Telegram su Drive"
+    "crea file di testo, carica file da Telegram su Drive\n"
+    "- WeatherAgent: previsioni meteo per qualsiasi città — oggi, domani o fino a 7 giorni; "
+    "usa Open-Meteo (no API key); fornisce temperatura min/max, condizioni, precipitazioni, vento, alba e tramonto"
 )

@@ -181,6 +181,10 @@ class TelegramBot:
         self.app.add_handler(
             MessageHandler(filters.Document.ALL & user_filter, self._handle_document)
         )
+        # Posizione GPS
+        self.app.add_handler(
+            MessageHandler(filters.LOCATION & user_filter, self._handle_location)
+        )
         # Callback dai bottoni inline delle sveglie
         self.app.add_handler(
             CallbackQueryHandler(self._handle_schedule_callback, pattern=r"^sched_(del|ref):")
@@ -240,7 +244,8 @@ class TelegramBot:
             "• Testo\n"
             "• Vocali / file audio (MP3, M4A, WAV…)\n"
             "• Immagini (foto o file PNG/JPG/WEBP)\n"
-            "• Documenti: PDF, DOC, DOCX, XLSX, CSV\n\n"
+            "• Documenti: PDF, DOC, DOCX, XLSX, CSV\n"
+            "• Posizione GPS (meteo, indirizzo e contesto locale)\n\n"
             "Usa la didascalia per darmi istruzioni sul file.\n\n"
             "*Comandi:*\n"
             "• /reset — cancella la memoria di sessione e riparte da zero\n"
@@ -566,6 +571,22 @@ class TelegramBot:
                 f"Formato non supportato: `{mime_type or doc.file_name}`\n"
                 "Accetto: immagini, PDF, DOC, DOCX, XLSX, CSV.",
             )
+
+    async def _handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        loc = update.message.location
+        lat, lon = loc.latitude, loc.longitude
+        logger.info(f"Posizione ricevuta da {update.effective_user.id}: lat={lat}, lon={lon}")
+
+        from .location_tools import build_location_context
+        context_block = await build_location_context(lat, lon)
+
+        prompt = (
+            f"{context_block}\n\n"
+            "L'utente ha condiviso la sua posizione. "
+            "Fornisci una risposta contestuale in italiano: "
+            "descrivi dove si trova, com'è il meteo in questo momento e qualcosa di utile legato al luogo."
+        )
+        await self._process_and_reply(update, context, prompt)
 
     async def _handle_schedule_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Gestisce i pulsanti inline delle sveglie (elimina / refresh)."""

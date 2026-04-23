@@ -34,6 +34,7 @@ User → Telegram
    │  • DriveAgent      (Google Drive)       │
    │  • CodeAgent       (math + CSV/Excel)   │
    │  • NotesAgent      (personal notes)     │
+   │  • WeatherAgent    (forecast by city)   │
    │  • SynthAgent      (final synthesis)    │
    └─────────────────────────────────────────┘
           │
@@ -119,6 +120,36 @@ When you send a `.csv` or `.xlsx` file, the bot saves it to `tmp/uploads/` and p
 
 ---
 
+### Weather (GPS location and city forecast)
+
+Two distinct entry points use the same underlying services — [Nominatim](https://nominatim.openstreetmap.org/) and [Open-Meteo](https://open-meteo.com/) — both free, no API key required.
+
+#### Share your GPS position
+
+When you share a location from Telegram, the bot fetches the reverse geocoded address and current weather in parallel, then injects the result into the SynthAgent prompt for a contextual reply:
+
+| Data | Source |
+|---|---|
+| Readable address (street, city, country) | Nominatim — OpenStreetMap reverse geocoding |
+| Current weather (temperature, humidity, wind, condition) | Open-Meteo `current` endpoint |
+| Sunrise and sunset times | Open-Meteo `daily` endpoint |
+
+Example response after sharing a location in Milan:
+
+> Sei nel centro di Milano, in Piazza del Duomo (20122). Il meteo è prevalentemente sereno con 20°C, umidità al 41% e vento a 8 km/h. Il sole tramonta alle 20:19.
+
+#### Ask for a forecast by city name
+
+The **WeatherAgent** handles natural language weather queries for any city, for today or up to 7 days ahead:
+
+> "Che tempo fa domani a Pordenone?"
+> "Previsioni per questa settimana a Roma"
+> "Che tempo farà dopodomani a Berlino?"
+
+For each day the response includes: condition, min/max temperature, precipitation (mm + probability), max wind speed, and sunrise/sunset times. The agent infers the number of days from the request ("domani" → 2, "questa settimana" → 7) and highlights only the relevant days.
+
+---
+
 ### Google Calendar integration
 
 The CalendarAgent reads and writes events on your Google Calendar. Examples:
@@ -172,6 +203,8 @@ Supported file types for reading: Google Docs, Google Sheets, Google Slides (exp
 | Calendar integration | Google Calendar API v3 (OAuth 2.0) |
 | Drive integration | Google Drive API v3 (OAuth 2.0) |
 | Code sandbox | RestrictedPython + openpyxl |
+| Geocoding | Nominatim (OpenStreetMap) |
+| Weather | Open-Meteo |
 
 ---
 
@@ -295,6 +328,7 @@ anclaw_telegram_agent/
 │       ├── bot.py                 # Telegram handlers (text, voice, photos, documents, callbacks)
 │       ├── calendar_tools.py      # Google Calendar tools (list/create/delete events)
 │       ├── drive_tools.py         # Google Drive tools (search, read, download, upload, create)
+│       ├── location_tools.py      # GPS context: reverse geocoding (Nominatim) + weather (Open-Meteo)
 │       ├── code_tools.py          # CodeAgent tools: execute_math, search_in_file, filter_file_rows
 │       ├── config.py              # Configuration from environment variables
 │       ├── memory_store.py        # Long-term user facts: save/get/delete + automatic extraction
