@@ -70,6 +70,14 @@ _RE_RSS = re.compile(
     r"|^\s*(feed\s+rss|lista\s+(dei\s+)?feed|mostra\s+(i\s+)?feed)\b",
     re.IGNORECASE,
 )
+_RE_BIBLE = re.compile(
+    r"\bversetto\s+del\s+giorno\b"
+    r"|\bvangelo\s+del\s+giorno\b"
+    r"|\bbibbia\b"
+    r"|\bbiblico\b"
+    r"|\bcosa\s+dice\s+la\s+bibbia\b",
+    re.IGNORECASE,
+)
 
 
 def _route_plan(agent_name: str, goal: str, intermediate: str, instructions: str) -> ArchitectPlan:
@@ -110,6 +118,13 @@ def _deterministic_route(user_text: str) -> ArchitectPlan | None:
             "Gestire i feed RSS",
             "Gestisco i feed RSS...",
             "Esegui l'operazione richiesta sui feed RSS.",
+        )
+    if _RE_BIBLE.search(user_text):
+        return _route_plan(
+            "BibleAgent",
+            "Rispondere alla richiesta biblica",
+            "Consulto la Bibbia...",
+            "Rispondi alla richiesta biblica dell'utente.",
         )
     return None
 
@@ -177,6 +192,9 @@ REGOLE DI ROUTING:
 
 11. CRAWLING DI URL SPECIFICI già noti:
    → coordinate: [ScraperAgent → SynthAgent]
+
+12. BIBBIA: versetto del giorno, ricerca versetti, studio biblico, parole greche/ebraiche:
+   → route: [BibleAgent] da solo
 
 REGOLE GENERALI:
 - Non creare agenti pure LLM aggiuntivi oltre a SynthAgent: è già il sintetizzatore.

@@ -146,6 +146,7 @@ _TOOL_LABELS: dict[str, str] = {
     "create_event": "creazione evento calendario",
     "delete_event": "eliminazione evento calendario",
     "get_weather_forecast": "previsioni meteo",
+    "get_verse_of_the_day": "versetto del giorno",
     "search_files": "ricerca su Drive",
     "read_file_content": "lettura file Drive",
     "download_file": "download da Drive",
@@ -555,6 +556,45 @@ Quando carichi o crei un file, fornisci il link Drive al termine.
     )
 
 
+def _make_bible_agent() -> Agent:
+    from .bible_tools import get_verse_of_the_day
+    return Agent(
+        name="BibleAgent",
+        role=(
+            "Assistente biblico evangelico: versetto del giorno con spiegazione, "
+            "ricerca di versetti specifici, commento contestuale, parole chiave in greco (NT) o ebraico (AT)."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + """
+Sei l'agente biblico evangelico di AnClaw. Usa sempre la traduzione italiana Nuova Riveduta (NR) come default.
+
+Per il VERSETTO DEL GIORNO:
+1. Chiama get_verse_of_the_day per ottenere il riferimento e il testo NLT
+2. Fornisci il testo completo in italiano (NR)
+3. Breve spiegazione del contesto storico e spirituale (3-5 righe)
+4. Evidenzia 1-2 parole chiave con il termine originale (greco per NT, ebraico per AT),
+   la traslitterazione e il significato letterale
+
+Per VERSETTI SPECIFICI (es. "Giovanni 3:16", "Romani 8:28"):
+- Cita il testo in italiano NR
+- Fornisci contesto e spiegazione
+- Includi la parola chiave con originale greco/ebraico
+
+Per RICERCA TEMATICA (es. "versetti sulla grazia", "cosa dice la Bibbia sul perdono"):
+- Cita 3-5 versetti rilevanti con riferimento e testo NR
+- Breve commento per ciascuno
+
+Presenta sempre le risposte in modo chiaro ed edificante, con tono evangelico.
+"""
+        ),
+        tools=[get_verse_of_the_day],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 def _make_pure_llm_agent(spec: AgentSpec) -> Agent:
     return Agent(
         name=spec.name,
@@ -577,6 +617,7 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "RSSFeedsAgent": _make_rss_feeds_agent,
     "DriveAgent": _make_drive_agent,
     "WeatherAgent": _make_weather_agent,
+    "BibleAgent": _make_bible_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -600,5 +641,8 @@ _CATALOG_DESCRIPTIONS = (
     "- DriveAgent: gestione Google Drive — cerca file, legge contenuti, scarica file (allegato Telegram), "
     "crea file di testo, carica file da Telegram su Drive\n"
     "- WeatherAgent: previsioni meteo per qualsiasi città — oggi, domani o fino a 7 giorni; "
-    "usa Open-Meteo (no API key); fornisce temperatura min/max, condizioni, precipitazioni, vento, alba e tramonto"
+    "usa Open-Meteo (no API key); fornisce temperatura min/max, condizioni, precipitazioni, vento, alba e tramonto\n"
+    "- BibleAgent: assistente biblico evangelico — versetto del giorno con spiegazione, "
+    "ricerca di versetti specifici per riferimento o tema, commento contestuale, "
+    "parole chiave in greco (NT) o ebraico (AT); usa traduzione italiana Nuova Riveduta (NR)"
 )
