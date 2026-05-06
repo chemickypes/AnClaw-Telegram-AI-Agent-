@@ -26,21 +26,24 @@ logger = logging.getLogger(__name__)
 
 _RE_CONTEXT_PREFIX = re.compile(r"^\[Contesto:[^\]]+\]\n\n", re.DOTALL)
 _RE_FILE_PREFIX = re.compile(r"^\[FILE SALVATO:[^\]]+\]\n*", re.DOTALL)
+_RE_HINT_PREFIX = re.compile(r"^\[HINT:[^\]]+\]\n*", re.DOTALL)
 
 
 def _strip_architect_prefix(message: str) -> str:
-    """Rimuove i prefissi aggiunti da agent.py prima del testo utente reale."""
+    """Rimuove i prefissi aggiunti da bot.py/agent.py prima del testo utente reale."""
     m = _RE_CONTEXT_PREFIX.match(message)
     text = message[m.end():] if m else message
-    m2 = _RE_FILE_PREFIX.match(text)
-    return text[m2.end():] if m2 else text
+    m2 = _RE_HINT_PREFIX.match(text)
+    text = text[m2.end():] if m2 else text
+    m3 = _RE_FILE_PREFIX.match(text)
+    return text[m3.end():] if m3 else text
 
 
 _RE_SCHEDULER = re.compile(
-    r"^\s*(ricordami|avvisami|notificami|crea|imposta|aggiungi|programma)\b.*"
+    r"^\s*(ricordami|avvisami|notificami|crea|imposta|aggiungi|programma|metti|setta)\b.*"
     r"\bogni\s+(giorno|settimana|mese|ora|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica)\b"
     r"|^\s*ogni\s+(giorno|settimana|mese|ora|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica)\b"
-    r"|^\s*(crea|imposta|aggiungi|programma)\s+(una?\s+)?(sveglia|task\s+ricorrente)\b",
+    r"|^\s*(crea|imposta|aggiungi|programma|metti|setta)\s+(una?\s+)?(sveglia|task\s+ricorrente)\b",
     re.IGNORECASE,
 )
 

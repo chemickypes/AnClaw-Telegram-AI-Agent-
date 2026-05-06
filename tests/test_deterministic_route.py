@@ -176,6 +176,45 @@ def test_one_shot_stays_reminder(msg):
     assert route(msg) == "ReminderAgent"
 
 
+# ── BibleAgent ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("msg", [
+    "dammi il versetto del giorno",
+    "qual è il vangelo del giorno?",
+    "cosa dice la bibbia sull'amore",
+    "commento biblico su Giovanni 3:16",
+])
+def test_bible_match(msg):
+    assert route(msg) == "BibleAgent"
+
+
+@pytest.mark.parametrize("msg", [
+    # Scheduler con "versetto del giorno" nel testo del comando → vince Scheduler
+    'metti una sveglia, ogni giorno alle 9.50 con il comando "dammi il versetto del giorno"',
+    'imposta una sveglia ogni giorno alle ore 9.50 con comando "dammi il versetto del giorno"',
+    'crea una sveglia ogni giorno alle 8 con il task "versetto del giorno"',
+    'programma ogni giorno alle 7:00 il comando "dammi il vangelo del giorno"',
+])
+def test_scheduler_wins_over_bible_when_scheduling(msg):
+    """Quando la richiesta è di creare una sveglia, lo Scheduler ha priorità
+    anche se il testo del comando contiene parole chiave bibliche."""
+    assert route(msg) == "SchedulerAgent"
+
+
+@pytest.mark.parametrize("raw", [
+    # bot.py aggiunge [HINT:...] prima del testo → deve essere strippato
+    '[HINT: possibile richiesta di gestione sveglie/scheduling]\nmetti una sveglia, ogni giorno alle 10:32 con il comando "dammi il versetto del giorno"',
+    '[HINT: possibile richiesta di gestione sveglie/scheduling]\nimposta una sveglia ogni giorno alle 9.50 con comando "dammi il versetto del giorno"',
+    '[HINT: possibile richiesta di promemoria one-shot]\nricordami di chiamare Marco alle 15',
+])
+def test_hint_prefix_is_stripped_before_routing(raw):
+    """Il prefisso [HINT:...] aggiunto da bot.py non deve impedire il routing deterministico."""
+    stripped = _strip_architect_prefix(raw)
+    assert not stripped.startswith("[HINT:")
+    plan = _deterministic_route(stripped)
+    assert plan is not None
+
+
 # ── Punto 5: _strip_architect_prefix ─────────────────────────────────────────
 
 def test_strip_context_prefix():

@@ -6,6 +6,7 @@ __pycache__/
 *.pyo
 *.db
 .DS_Store
+.idea/
 credentials.json
 token.json
 dist/
