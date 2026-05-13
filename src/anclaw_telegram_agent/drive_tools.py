@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _TOKEN_PATH = os.path.join(_PROJECT_ROOT, "token.json")

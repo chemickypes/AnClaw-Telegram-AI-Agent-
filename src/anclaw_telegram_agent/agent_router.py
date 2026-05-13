@@ -81,6 +81,31 @@ _RE_BIBLE = re.compile(
     r"|\bcosa\s+dice\s+la\s+bibbia\b",
     re.IGNORECASE,
 )
+_RE_NEWSLETTER = re.compile(
+    r"\bnewsletter\b"
+    r"|\briassunto\s+delle?\s+(mie\s+)?email\b"
+    r"|\bmittent[ei]\s+newsletter\b"
+    r"|\baggiungi\s+(un\s+)?mittente\b"
+    r"|\brimuovi\s+(un\s+)?mittente\b",
+    re.IGNORECASE,
+)
+_RE_EMAIL_LIST = re.compile(
+    r"^\s*(dammi|mostra|elenca|leggi|vedi|lista)\s+(le\s+|tutte?\s+le\s+|le\s+mie\s+)?email\b"
+    r"|^\s*email\s+(di\s+|del\s+|della\s+|non\s+lette?)\b",
+    re.IGNORECASE,
+)
+_RE_EMAIL_BRIEFING = re.compile(
+    r"\bbriefing\s*(delle?\s*)?email\b"
+    r"|\bcontrolla\s*(le\s*mie\s*)?email\b"
+    r"|\bho\s*email\s*non\s*lette\b"
+    r"|\bleggi\s*(la\s*mia\s*)?inbox\b",
+    re.IGNORECASE,
+)
+_RE_EMAIL_DETAIL = re.compile(
+    r"\b(approfondisci|leggi|apri|mostra|dimmi)\b.{0,40}\b(email|mail)\b.{0,40}\bid\b"
+    r"|\b(approfondisci|leggi|apri)\b.{0,20}\bid\b.{0,5}[:\s][a-zA-Z0-9]+",
+    re.IGNORECASE,
+)
 
 
 def _route_plan(agent_name: str, goal: str, intermediate: str, instructions: str) -> ArchitectPlan:
@@ -128,6 +153,63 @@ def _deterministic_route(user_text: str) -> ArchitectPlan | None:
             "Rispondere alla richiesta biblica",
             "Consulto la Bibbia...",
             "Rispondi alla richiesta biblica dell'utente.",
+        )
+    if _RE_EMAIL_DETAIL.search(user_text):
+        return ArchitectPlan(
+            goal="Leggere l'email per ID, scrapare i link presenti e produrre un riassunto",
+            intermediate_message="Leggo l'email e approfondisco i contenuti...",
+            team_name="AnClaw Email Detail Team",
+            team_mode="coordinate",
+            agents=[
+                AgentSpec(
+                    name="EmailBriefingAgent",
+                    role="EmailBriefingAgent",
+                    instructions=(
+                        "L'utente vuole approfondire una email specifica. "
+                        "Estrai l'ID email dal messaggio e chiama get_email_by_id(message_id). "
+                        "Restituisci mittente, oggetto, data, corpo completo e la lista di tutti "
+                        "i link trovati (formato: '## LINK' seguito da elenco). "
+                        "Non riassumere: dati grezzi completi per il passo successivo."
+                    ),
+                    is_pure_llm=False,
+                ),
+                AgentSpec(
+                    name="ScraperAgent",
+                    role="ScraperAgent",
+                    instructions=(
+                        "Ricevi il contenuto dell'email. Se nella sezione '## LINK' ci sono URL, "
+                        "visita i top 3 più rilevanti ed estrai il contenuto testuale completo. "
+                        "Se non ci sono link, rispondi 'Nessun link da approfondire'. "
+                        "Restituisci tutto il testo estratto senza riassumere."
+                    ),
+                    is_pure_llm=False,
+                ),
+                AgentSpec(
+                    name="SynthAgent",
+                    role="SynthAgent",
+                    instructions=(
+                        "Produci un riassunto completo in italiano in due parti: "
+                        "1) Riepilogo dell'email (mittente, oggetto, contenuto principale); "
+                        "2) Sintesi dei contenuti trovati seguendo i link (se presenti). "
+                        "Se non erano presenti link, ometti la seconda parte."
+                    ),
+                    is_pure_llm=False,
+                ),
+            ],
+        )
+    if _RE_EMAIL_BRIEFING.search(user_text) or _RE_EMAIL_LIST.match(user_text):
+        return _route_plan(
+            "EmailBriefingAgent",
+            "Briefing email inbox non lette",
+            "Accedo alla tua inbox...",
+            "Recupera le email non lette e crea un briefing conversazionale, poi segnale come lette.",
+        )
+    if _RE_NEWSLETTER.search(user_text):
+        return _route_plan(
+            "NewsletterAgent",
+            "Gestire le newsletter email",
+            "Accedo alle tue newsletter...",
+            "Esegui l'operazione richiesta sulle newsletter.",
         )
     return None
 
@@ -198,6 +280,22 @@ REGOLE DI ROUTING:
 
 12. BIBBIA: versetto del giorno, ricerca versetti, studio biblico, parole greche/ebraiche:
    → route: [BibleAgent] da solo
+
+13. EMAIL INBOX (leggi email, briefing email, email non lette, controlla email):
+   Il messaggio contiene "leggi le email", "dammi le email", "email non lette", "briefing email",
+   "controlla le email", "ho email non lette".
+   → route: [EmailBriefingAgent] da solo
+
+13b. LETTURA EMAIL SINGOLA PER ID (approfondisci/leggi/apri email con id X):
+   Il messaggio contiene "approfondisci email id", "leggi email id", "apri email id".
+   → coordinate: [EmailBriefingAgent → ScraperAgent → SynthAgent]
+   EmailBriefingAgent legge l'email con get_email_by_id e restituisce corpo + link,
+   ScraperAgent apre i link trovati, SynthAgent produce il riassunto finale.
+
+14. NEWSLETTER / GESTIONE MITTENTI (newsletter, riassunto newsletter per data, mittenti newsletter):
+   Il messaggio contiene "newsletter", "riassunto delle email", "mittenti newsletter",
+   "aggiungi mittente", "rimuovi mittente".
+   → route: [NewsletterAgent] da solo
 
 REGOLE GENERALI:
 - Non creare agenti pure LLM aggiuntivi oltre a SynthAgent: è già il sintetizzatore.

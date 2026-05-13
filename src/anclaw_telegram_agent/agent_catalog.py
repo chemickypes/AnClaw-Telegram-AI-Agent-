@@ -595,6 +595,98 @@ Presenta sempre le risposte in modo chiaro ed edificante, con tono evangelico.
     )
 
 
+def _make_email_briefing_agent() -> Agent:
+    from .gmail_tools import fetch_unread_emails, mark_emails_as_read, get_email_by_id
+    return Agent(
+        name="EmailBriefingAgent",
+        role=(
+            "Gestione email Gmail: briefing conversazionale delle email non lette di un giorno, "
+            "oppure lettura del contenuto completo di una email specifica per ID."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + """
+Sei l'Executive Assistant per la gestione email di Angelo Moroni.
+
+HAI DUE MODALITÀ:
+
+── MODALITÀ BRIEFING (richiesta: "leggi le email", "email di oggi", ecc.) ──
+1. Determina la data dalla richiesta:
+   - "oggi" → target_date="oggi", "ieri" → target_date="ieri", data specifica → quella data.
+   - Se non specificata, usa "oggi".
+2. Chiama fetch_unread_emails(target_date).
+3. Produci un BRIEFING CONVERSAZIONALE E NARRATIVO:
+   - NON elencare in modo secco: tessile in un racconto coerente.
+   - Dopo ogni riferimento a un'email, includi subito il suo ID tra parentesi (ID: 18f2abc123).
+   - Se un'email contiene link, menzionane l'esistenza.
+   - Tono: professionale ma conversazionale.
+4. Chiama mark_emails_as_read() con tutti gli ID processati.
+5. Conferma quante email sono state segnate come lette.
+
+── MODALITÀ LETTURA SINGOLA (richiesta: "approfondisci/leggi email id X") ──
+1. Estrai l'ID dal messaggio dell'utente.
+2. Chiama get_email_by_id(message_id).
+3. Restituisci mittente, oggetto, data, il corpo completo dell'email
+   e la lista esplicita di tutti i link trovati (formato: "## LINK\n- url1\n- url2").
+   Non riassumere: restituisci dati grezzi completi per il passo successivo.
+"""
+        ),
+        tools=[fetch_unread_emails, mark_emails_as_read, get_email_by_id],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
+def _make_newsletter_agent() -> Agent:
+    from .gmail_tools import (
+        get_newsletter_summary,
+        get_newsletter_senders,
+        add_newsletter_sender,
+        remove_newsletter_sender,
+        list_emails,
+    )
+    return Agent(
+        name="NewsletterAgent",
+        role=(
+            "Recupera e riassume le email newsletter per un giorno specifico via Gmail. "
+            "Gestisce la lista dei mittenti newsletter (aggiunge, mostra, rimuove)."
+        ),
+        model=Gemini(id="gemini-2.5-flash"),
+        instructions=(
+            _base_instructions()
+            + """
+Sei l'agente Gmail di AnClaw. Hai accesso a Gmail in sola lettura.
+
+Per ELENCARE LE EMAIL DI UN GIORNO:
+- Chiama list_emails(target_date) per le email non lette (default).
+- Chiama list_emails(target_date, unread_only=False) se l'utente vuole tutte le email.
+- Presenta il risultato come lista numerata: mittente — oggetto.
+
+Per il RIASSUNTO NEWSLETTER:
+1. Chiama get_newsletter_summary(target_date) con la data richiesta.
+   Esempi: "oggi", "ieri", "10 Maggio", "10 maggio 2026", "2026-05-10".
+2. Analizza le email restituite e produci un riassunto strutturato:
+   - Raggruppa per mittente/fonte
+   - Per ogni email: oggetto + sintesi del contenuto in 2-3 righe
+   - Evidenzia gli articoli o temi più interessanti
+
+Per GESTIRE LA LISTA MITTENTI NEWSLETTER:
+- get_newsletter_senders(): mostra i mittenti configurati con ID
+- add_newsletter_sender(name): aggiunge un mittente (es. "Medium", "Morning Brew")
+  Il matching è parziale e case-insensitive: "Medium" cattura anche "Medium Daily Digest"
+- remove_newsletter_sender(sender_id): rimuove un mittente per ID
+
+Presenta le email in modo chiaro e leggibile.
+Conferma sempre le azioni di aggiunta/rimozione mittenti.
+"""
+        ),
+        tools=[list_emails, get_newsletter_summary, get_newsletter_senders, add_newsletter_sender, remove_newsletter_sender],
+        debug_mode=True,
+        debug_level=2,
+    )
+
+
 def _make_pure_llm_agent(spec: AgentSpec) -> Agent:
     return Agent(
         name=spec.name,
@@ -618,6 +710,8 @@ _AGENT_CATALOG: dict[str, Callable[[], Agent]] = {
     "DriveAgent": _make_drive_agent,
     "WeatherAgent": _make_weather_agent,
     "BibleAgent": _make_bible_agent,
+    "EmailBriefingAgent": _make_email_briefing_agent,
+    "NewsletterAgent": _make_newsletter_agent,
 }
 
 _CATALOG_DESCRIPTIONS = (
@@ -644,5 +738,10 @@ _CATALOG_DESCRIPTIONS = (
     "usa Open-Meteo (no API key); fornisce temperatura min/max, condizioni, precipitazioni, vento, alba e tramonto\n"
     "- BibleAgent: assistente biblico evangelico — versetto del giorno con spiegazione, "
     "ricerca di versetti specifici per riferimento o tema, commento contestuale, "
-    "parole chiave in greco (NT) o ebraico (AT); usa traduzione italiana Nuova Riveduta (NR)"
+    "parole chiave in greco (NT) o ebraico (AT); usa traduzione italiana Nuova Riveduta (NR)\n"
+    "- EmailBriefingAgent: briefing conversazionale inbox Gmail — recupera TUTTE le email non lette, "
+    "crea un riassunto narrativo con ID di ogni email tra parentesi, segnala link presenti, "
+    "poi segna tutte le email come lette; usare per 'leggi le mie email', 'briefing email', 'email non lette'\n"
+    "- NewsletterAgent: gestione newsletter Gmail — elenca email per giorno, riassume newsletter "
+    "filtrate per mittente; gestisce la lista dei mittenti newsletter (aggiunge, mostra, rimuove)"
 )
